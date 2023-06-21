@@ -429,3 +429,7 @@ class LayerAveraging:
         phi = max_value(min_value(1, (r - rp) / (rn - rp)), 0)
         val.assign(avg[-1])
         u.interpolate(u + val * phi)
+
+
+def gaussian(r, r_0, sigma):
+    return exp(-0.5 * (r - r_0)**2 / sigma**2)
