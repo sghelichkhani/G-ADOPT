@@ -30,7 +30,7 @@ left_id, right_id = 1, 2
 
 domain_volume = assemble(1*dx(domain=mesh))
 
-# Set up function spaces for the P2P1 pair
+# Set up function spaces for the Q2Q1 pair
 V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
 W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
 Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
@@ -69,7 +69,7 @@ delta_t = Constant(4e-6)  # Constant time step
 max_timesteps = 80
 time = 0.0
 
-Z_nullspace = create_stokes_nullspace(Z)
+Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
 
 # Free-slip velocity boundary condition on all sides
 stokes_bcs = {
