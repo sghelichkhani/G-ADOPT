@@ -83,22 +83,13 @@ temp_bcs = {
     bottom_id: {"T": 1.0},
 }
 
-solver_parameters = {
-    "snes_type": "ksponly",
-    "ksp_type": "preonly",
-    "pc_type": "lu",
-    "pc_factor_mat_solver_type": "mumps",
-    "mat_type": "aij",
-}
-
 energy_solver = EnergySolver(
     T,
     u,
     approximation,
     delta_t,
     ImplicitMidpoint,
-    bcs=temp_bcs,
-    solver_parameters=solver_parameters
+    bcs=temp_bcs
 )
 Told = energy_solver.T_old
 Ttheta = 0.5*T + 0.5*Told
@@ -110,8 +101,7 @@ stokes_solver = StokesSolver(
     approximation,
     bcs=stokes_bcs,
     nullspace=Z_nullspace,
-    transpose_nullspace=Z_nullspace,
-    solver_parameters=solver_parameters,
+    transpose_nullspace=Z_nullspace
 )
 
 output_file = File("visualisation/output_forward.pvd")
