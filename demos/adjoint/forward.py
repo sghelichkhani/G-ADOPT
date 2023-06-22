@@ -120,7 +120,7 @@ for timestep in range(0, max_timesteps):
 
     u_checkpoint.save_function(u, idx=timestep)
 
-    if timestep % dump_period == 0:
+    if timestep % dump_period == 0 or timestep == max_timesteps-1:
         output_file.write(u, p, T)
 
 u_checkpoint.close()
