@@ -1,5 +1,6 @@
 from gadopt import *
 from firedrake_adjoint import *
+import ROL
 
 dx = dx(degree=6)
 
@@ -11,7 +12,7 @@ left_id, right_id = 1, 2
 
 domain_volume = assemble(1*dx(domain=mesh))
 
-# Set up function spaces for the P2P1 pair
+# Set up function spaces for the Q2Q1 pair
 V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
 W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
 Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
@@ -42,7 +43,7 @@ delta_t = Constant(4e-6)  # Constant time step
 max_timesteps = 80
 time = 0.0
 
-Z_nullspace = create_stokes_nullspace(Z)
+Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
 
 # Imposed velocity boundary condition on top, free-slip on other sides
 stokes_bcs = {
@@ -56,14 +57,6 @@ temp_bcs = {
     bottom_id: {"T": 1.0},
 }
 
-solver_parameters = {
-    "snes_type": "ksponly",
-    "ksp_type": "preonly",
-    "pc_type": "lu",
-    "pc_factor_mat_solver_type": "mumps",
-    "mat_type": "aij",
-}
-
 energy_solver = EnergySolver(
     T,
     u,
@@ -71,7 +64,6 @@ energy_solver = EnergySolver(
     delta_t,
     ImplicitMidpoint,
     bcs=temp_bcs,
-    solver_parameters=solver_parameters
 )
 Told = energy_solver.T_old
 Ttheta = 0.5*T + 0.5*Told
@@ -84,7 +76,6 @@ stokes_solver = StokesSolver(
     bcs=stokes_bcs,
     nullspace=Z_nullspace,
     transpose_nullspace=Z_nullspace,
-    solver_parameters=solver_parameters,
 )
 
 # Project the initial condition from Q1 to Q
@@ -97,9 +88,6 @@ ic_projection_problem = LinearVariationalProblem(
 ic_projection_solver = LinearVariationalSolver(ic_projection_problem)
 
 ic_projection_solver.solve()
-
-output_file = File("visualisation/output_inverse_imposed.pvd")
-dump_period = 10
 
 # Control variable for optimisation
 control = Control(T_ic)
@@ -114,9 +102,6 @@ for timestep in range(0, max_timesteps):
 
     average_temperature = assemble(T * dx) / domain_volume
     log(f"{timestep} {time:.02e} {average_temperature:.1e}")
-
-    if timestep % dump_period == 0:
-        output_file.write(u, p, T)
 
     # load the reference velocity for the next timestep
     u_ref.assign(u_checkpoint.load_function(mesh, name="Velocity", idx=timestep))
@@ -149,3 +134,104 @@ objective = (
 
 reduced_functional = ReducedFunctional(objective, control)
 log(f"reduced functional: {reduced_functional(T_average)}")
+
+# All done with the forward run, stop annotating anything else to the tape
+pause_annotation()
+
+optimisation_output = File("solution/inverse_imposed.pvd")
+
+
+class StatusTest(ROL.StatusTest):
+    def check(self, status):
+        # Write out solution at this point
+        initial_state = Function(Q, name="Optimised Initial State")
+        initial_state.assign(T.block_variable.checkpoint)  # .restore())
+
+        final_state = Function(Q1, name="Optimised Final State")
+        final_state.assign(T_ic.block_variable.checkpoint)  # .restore())
+        optimisation_output.write(initial_state, final_state)
+
+        initial_misfit = assemble((initial_state - T_average) ** 2 * dx)
+        final_misfit = assemble((final_state - T_reference) ** 2 * dx)
+
+        log(f"Initial misfit: {initial_misfit:.2e}; final misfit: {final_misfit:.2e}")
+
+        # Pass through to the original status test
+        return super().check(status)
+
+
+T_lb = Function(Q1, name="Lower boundary temperature")
+T_ub = Function(Q1, name="Upper boundary temperature")
+T_lb.assign(0.0)
+T_ub.assign(1.0)
+
+minimisation_parameters = {
+    "General": {
+        "Print Verbosity": 1 if mesh.comm.rank == 0 else 0,
+        "Output Level": 1 if mesh.comm.rank == 0 else 0,
+        "Krylov": {
+            "Iteration Limit": 10,
+            "Absolute Tolerance": 1e-4,
+            "Relative Tolerance": 1e-2,
+        },
+        "Secant": {
+            "Type": "Limited-Memory BFGS",
+            "Maximum Storage": 10,
+            "Use as Hessian": True,
+            "Barzilai-Borwein": 1,
+        },
+    },
+    "Step": {
+        "Type": "Trust Region",
+        "Trust Region": {
+            "Lin-More": {
+                "Maximum Number of Minor Iterations": 10,
+                "Sufficient Decrease Parameter": 1e-2,
+                "Relative Tolerance Exponent": 1.0,
+                "Cauchy Point": {
+                    "Maximum Number of Reduction Steps": 10,
+                    "Maximum Number of Expansion Stpes": 10,
+                    "Initial Step Size": 1.0,
+                    "Normalize Initial Step Size": True,
+                    "Reduction Rate": 0.1,
+                    "Expansion Rate": 10.0,
+                    "Decrease Tolerance": 1e-8,
+                },
+                "Projected Search": {
+                    "Backtracking Rate": 0.5,
+                    "Maximum Number of Steps": 20,
+                },
+            },
+            "Subproblem Model": "Lin-More",
+            "Initial Radius": 1.0,
+            "Maximum Radius": 1e20,
+            "Step Acceptance Threshold": 0.05,
+            "Radius Shrinking Threshold": 0.05,
+            "Radius Growing Threshold": 0.9,
+            "Radius Shrinking Rate (Negative rho)": 0.0625,
+            "Radius Shrinking Rate (Positive rho)": 0.25,
+            "Radius Growing Rate": 10.0,
+            "Sufficient Decrease Parameter": 1e-2,
+            "Safeguard Size": 100,
+        },
+    },
+    "Status Test": {
+        "Gradient Tolerance": 0,
+        "Iteration Limit": 100,
+    },
+}
+
+minimisation_problem = MinimizationProblem(reduced_functional, bounds=(T_lb, T_ub))
+# create a solver to set up the wrapped objective, vector, and bounds objects
+rol_solver = ROLSolver(minimisation_problem, minimisation_parameters, inner_product="L2")
+
+rol_parameters = ROL.ParameterList(minimisation_parameters, "Parameters")
+rol_secant = ROL.InitBFGS(minimisation_parameters["General"]["Secant"]["Maximum Storage"])
+rol_algorithm = ROL.LinMoreAlgorithm(rol_parameters, rol_secant)
+
+rol_algorithm.setStatusTest(StatusTest(rol_parameters), False)
+rol_algorithm.run(
+    rol_solver.rolvector,
+    rol_solver.rolobjective,
+    rol_solver.bounds
+)
