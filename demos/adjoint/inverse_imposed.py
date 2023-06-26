@@ -27,6 +27,8 @@ u, p = z.subfunctions  # Symbolic UFL expressions for u and p
 u.rename("Velocity")
 p.rename("Pressure")
 
+# Without a restart to continue from, our initial guess is the final state of the forward run
+# We need to project the state from Q2 into Q1
 T_ic = Function(Q1, name="Initial Temperature")
 with CheckpointFile("final_state.h5", "r") as f:
     T_ic.project(f.load_function(mesh, "Temperature"))
@@ -56,6 +58,10 @@ temp_bcs = {
     top_id: {"T": 0.0},
     bottom_id: {"T": 1.0},
 }
+temp_bcs_q1 = [
+    DirichletBC(Q1, 0.0, top_id),
+    DirichletBC(Q1, 1.0, bottom_id),
+]
 
 energy_solver = EnergySolver(
     T,
@@ -67,7 +73,6 @@ energy_solver = EnergySolver(
 )
 Told = energy_solver.T_old
 Ttheta = 0.5*T + 0.5*Told
-Told.assign(T)
 
 stokes_solver = StokesSolver(
     z,
@@ -78,19 +83,34 @@ stokes_solver = StokesSolver(
     transpose_nullspace=Z_nullspace,
 )
 
+# Define a simple problem to apply the imposed boundary condition to the IC
+T_ = Function(Q1)
+bc_problem = LinearVariationalProblem(
+    q1 * TrialFunction(Q1) * dx,
+    q1 * T_ * dx,
+    T_ic,
+    bcs=temp_bcs_q1,
+)
+bc_solver = LinearVariationalSolver(bc_problem)
+
 # Project the initial condition from Q1 to Q
 ic_projection_problem = LinearVariationalProblem(
     q * TrialFunction(Q) * dx,
     q * T_ic * dx,
-    T,
+    Told,
     bcs=energy_solver.strong_bcs,
 )
 ic_projection_solver = LinearVariationalSolver(ic_projection_problem)
 
-ic_projection_solver.solve()
-
 # Control variable for optimisation
 control = Control(T_ic)
+
+# Apply the boundary condition to the control
+# and obtain the initial condition
+T_.assign(T_ic)
+bc_solver.solve()
+ic_projection_solver.solve()
+T.assign(Told)
 
 u_checkpoint = CheckpointFile("reference_velocity.h5", "r")
 
@@ -103,7 +123,9 @@ for timestep in range(0, max_timesteps):
     average_temperature = assemble(T * dx) / domain_volume
     log(f"{timestep} {time:.02e} {average_temperature:.1e}")
 
-    # load the reference velocity for the next timestep
+    # load the reference velocity for the next timestep since this is
+    # saved after the solves in the forward run, we reload after the
+    # solves here
     u_ref.assign(u_checkpoint.load_function(mesh, name="Velocity", idx=timestep))
 
 with CheckpointFile("initial_state.h5", "r") as f:
@@ -133,10 +155,10 @@ objective = (
 )
 
 reduced_functional = ReducedFunctional(objective, control)
-log(f"reduced functional: {reduced_functional(T_average)}")
 
 # All done with the forward run, stop annotating anything else to the tape
 pause_annotation()
+log(f"reduced functional: {reduced_functional(T_average)}")
 
 optimisation_output = File("solution/inverse_imposed.pvd")
 
@@ -144,17 +166,17 @@ optimisation_output = File("solution/inverse_imposed.pvd")
 class StatusTest(ROL.StatusTest):
     def check(self, status):
         # Write out solution at this point
-        initial_state = Function(Q, name="Optimised Initial State")
-        initial_state.assign(T.block_variable.checkpoint)  # .restore())
+        initial_state = Function(Q1, name="Optimised Initial State")
+        initial_state.assign(T_ic.block_variable.checkpoint)  # .restore())
 
-        final_state = Function(Q1, name="Optimised Final State")
-        final_state.assign(T_ic.block_variable.checkpoint)  # .restore())
+        final_state = Function(Q, name="Optimised Final State")
+        final_state.assign(T.block_variable.checkpoint)  # .restore())
         optimisation_output.write(initial_state, final_state)
 
         initial_misfit = assemble((initial_state - T_average) ** 2 * dx)
         final_misfit = assemble((final_state - T_reference) ** 2 * dx)
 
-        log(f"Initial misfit: {initial_misfit:.2e}; final misfit: {final_misfit:.2e}")
+        log(f"Initial misfit: {initial_misfit}; final misfit: {final_misfit}")
 
         # Pass through to the original status test
         return super().check(status)
@@ -190,7 +212,7 @@ minimisation_parameters = {
                 "Relative Tolerance Exponent": 1.0,
                 "Cauchy Point": {
                     "Maximum Number of Reduction Steps": 10,
-                    "Maximum Number of Expansion Stpes": 10,
+                    "Maximum Number of Expansion Steps": 10,
                     "Initial Step Size": 1.0,
                     "Normalize Initial Step Size": True,
                     "Reduction Rate": 0.1,
