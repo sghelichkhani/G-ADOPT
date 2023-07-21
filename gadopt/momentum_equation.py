@@ -186,13 +186,68 @@ class MomentumSourceTerm(BaseTerm):
 
         return F
 
+class PrestressAdvectionFreeSurfaceTerm(BaseTerm):
+    def residual(self, test, trial, trial_lagged, fields, bcs):
+        surface_id = fields['surface_id']
+        rhog = fields['rhog']
+        n = self.n
+        phi = test
+        assert normal_is_continuous(phi)
+        F = rhog*div(phi) *dot(n, trial)*self.ds(surface_id)
+
+
+        return -F
+
+class PreviousStressTerm(BaseTerm):
+
+    r"""
+    Viscosity term :math:`-\nabla \cdot (\mu \nabla u)`
+
+    Using the symmetric interior penalty method the weak form becomes
+
+    .. math::
+        -\int_\Omega \nabla \cdot (\mu \nabla u) \phi dx
+        =& \int_\Omega \mu (\nabla \phi) \cdot (\nabla u) dx \\
+        &- \int_{\mathcal{I}\cup\mathcal{I}_v} \text{jump}(\phi \textbf{n})
+        \cdot \text{avg}(\mu \nabla u) dS
+        - \int_{\mathcal{I}\cup\mathcal{I}_v} \text{jump}(u \textbf{n})
+        \cdot \text{avg}(\mu  \nabla \phi) dS \\
+        &+ \int_{\mathcal{I}\cup\mathcal{I}_v} \sigma \text{avg}(\mu) \text{jump}(u \textbf{n}) \cdot
+            \text{jump}(\phi \textbf{n}) dS
+
+    where :math:`\sigma` is a penalty parameter,
+    see Epshteyn and Riviere (2007).
+
+    Epshteyn and Riviere (2007). Estimation of penalty parameters for symmetric
+    interior penalty Galerkin methods. Journal of Computational and Applied
+    Mathematics, 206(2):843-872. http://dx.doi.org/10.1016/j.cam.2006.08.029
+
+    """
+    def residual(self, test, trial, trial_lagged, fields, bcs):
+
+        mu = fields['viscosity']
+        previous_stress = fields['previous_stress']
+        phi = test
+        n = self.n
+        u = trial_lagged # DOES THIS WORK OK ? 
+        u_lagged = trial_lagged
+        compressible = self.term_kwargs['compressible']
+
+        grad_test = nabla_grad(phi)
+        if compressible:
+            stress -= 2/3 * mu * Identity(self.dim) * div(u)
+
+        F = inner(grad_test, previous_stress)*self.dx
+
+        return -F
+
 
 class MomentumEquation(BaseEquation):
     """
     Momentum equation with advection, viscosity, pressure gradient, source term, and coriolis.
     """
 
-    terms = [ViscosityTerm, PressureGradientTerm, MomentumSourceTerm]
+    terms = [ViscosityTerm, PressureGradientTerm, MomentumSourceTerm, PrestressAdvectionFreeSurfaceTerm,PreviousStressTerm]
 
 
 class ContinuityEquation(BaseEquation):
