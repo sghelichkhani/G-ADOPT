@@ -247,7 +247,7 @@ class MomentumEquation(BaseEquation):
     Momentum equation with advection, viscosity, pressure gradient, source term, and coriolis.
     """
 
-    terms = [ViscosityTerm, PressureGradientTerm, MomentumSourceTerm, PrestressAdvectionFreeSurfaceTerm,PreviousStressTerm]
+    terms = [ViscosityTerm, PressureGradientTerm, MomentumSourceTerm] #, PrestressAdvectionFreeSurfaceTerm,PreviousStressTerm]
 
 
 class ContinuityEquation(BaseEquation):
