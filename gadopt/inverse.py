@@ -1,6 +1,7 @@
 from firedrake import CheckpointFile
 import firedrake.utils
-from firedrake_adjoint import *
+from firedrake_adjoint import *  # noqa: F401
+from pathlib import Path
 from mpi4py import MPI
 from pyadjoint.optimization.optimization_solver import OptimizationSolver
 import pyadjoint.optimization.rol_solver as pyadjoint_rol
@@ -11,18 +12,18 @@ _vector_registry = []
 
 
 class ROLSolver(pyadjoint_rol.ROLSolver):
-    def __init__(self, problem, parameters, inner_product="L2", vector_class=pyadjoint_rol.ROLVector):
+    def __init__(self, problem, parameters, inner_product="L2", vector_class=pyadjoint_rol.ROLVector, vector_args=[]):
         OptimizationSolver.__init__(self, problem, parameters)
-        self.rolobjective = ROLObjective(problem.reduced_functional)
+        self.rolobjective = pyadjoint_rol.ROLObjective(problem.reduced_functional)
         x = [p.tape_value() for p in self.problem.reduced_functional.controls]
-        self.rolvector = vector_class(x, inner_product=inner_product)
+        self.rolvector = vector_class(x, *vector_args, inner_product=inner_product)
         self.params_dict = parameters
 
         self.bounds = self.__get_bounds()
         self.constraints = self.__get_constraints()
 
 
-class CheckpointedROLVector(pyadjoint_rol.ROL_Vector):
+class CheckpointedROLVector(pyadjoint_rol.ROLVector):
     def __init__(self, dat, checkpoint_dir, inner_product="L2"):
         super().__init__(dat, inner_product)
 
@@ -32,17 +33,17 @@ class CheckpointedROLVector(pyadjoint_rol.ROL_Vector):
         dat = []
         for x in self.dat:
             dat.append(x._ad_copy())
-        res = CheckpointedROLVector(dat, inner_product=self.inner_product)
+        res = CheckpointedROLVector(dat, self._checkpoint_dir, inner_product=self.inner_product)
         res.scale(0.0)
         return res
 
     def save(self, checkpoint_path):
-        with CheckpointFile(checkpoint_path, "w") as f:
+        with CheckpointFile(str(checkpoint_path), "w") as f:
             for i, func in enumerate(self.dat):
                 f.save_function(func, name=f"dat_{i}")
 
     def load(self, mesh):
-        with CheckpointFile(self.checkpoint_path, "r") as f:
+        with CheckpointFile(str(self.checkpoint_path), "r") as f:
             for i in range(len(self.dat)):
                 self.dat[i] = f.load_function(mesh, name=f"dat_{i}")
 
@@ -56,6 +57,7 @@ class CheckpointedROLVector(pyadjoint_rol.ROL_Vector):
         # initialise C++ state
         super().__init__(state)
         self.checkpoint_path, self.inner_product = state
+        self._checkpoint_dir = self.checkpoint_path.parent
 
         _vector_registry.append(self)
 
@@ -77,6 +79,7 @@ class LinMoreOptimiser:
 
             self._mesh = problem.reduced_functional.controls[0].control.function_space().mesh()
             solver_kwargs["vector_class"] = CheckpointedROLVector
+            solver_kwargs["vector_args"] = [self._checkpoint_dir]
 
         self.rol_solver = ROLSolver(problem, parameters, inner_product="L2", **solver_kwargs)
         self.rol_parameters = ROL.ParameterList(parameters, "Parameters")
@@ -98,16 +101,17 @@ class LinMoreOptimiser:
     def checkpoint(self):
         """Checkpoint the current ROL state to disk."""
 
-        ROL.serialise_secant(self.rol_secant, MPI.COMM_WORLD.rank, self._checkpoint_dir)
-        ROL.serialise_algorithm(self.rol_algorithm, MPI.COMM_WORLD.rank, self._checkpoint_dir)
+        ROL.serialise_secant(self.rol_secant, MPI.COMM_WORLD.rank, str(self._checkpoint_dir))
+        ROL.serialise_algorithm(self.rol_algorithm, MPI.COMM_WORLD.rank, str(self._checkpoint_dir))
 
-        with CheckpointFile(self._checkpoint_dir / "solution_checkpoint.h5", "w") as f:
+        checkpoint_path = self._checkpoint_dir / "solution_checkpoint.h5"
+        with CheckpointFile(str(checkpoint_path), "w") as f:
             for i, func in enumerate(self.rol_solver.rolvector.dat):
                 f.save_function(func, name=f"dat_{i}")
 
-    def reload(self, iteration):
-        ROL.load_secant(self.rol_secant, MPI.COMM_WORLD.rank, self._checkpoint_dir)
-        ROL.load_algorithm(self.rol_algorithm, MPI.COMM_WORLD.rank, self._checkpoint_dir)
+    def restore(self):
+        ROL.load_secant(self.rol_secant, MPI.COMM_WORLD.rank, str(self._checkpoint_dir))
+        ROL.load_algorithm(self.rol_algorithm, MPI.COMM_WORLD.rank, str(self._checkpoint_dir))
 
         self.rol_solver.rolvector.checkpoint_path = self._checkpoint_dir / "solution_checkpoint.h5"
         self.rol_solver.rolvector.load(self._mesh)
