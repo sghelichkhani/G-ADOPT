@@ -43,7 +43,7 @@ u, p = z.split() #subfunctions  # Do this first to extract individual velocity a
 u.rename("Displacement")
 p.rename("Pressure")
 # Create output file and select output_frequency:
-output_file = File("output_elastic_D_mu1e10.pvd")
+output_file = File("output_elastic_D_mu1e10_nonull.pvd")
 
 rho0 = 4500 # density in kg/m^3
 g = 10 # gravitational acceleration in m/s^2
@@ -63,8 +63,8 @@ stokes_bcs = {
 }
 
 stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs, mu=mu,
-                             cartesian=True,
-                             nullspace=Z_nullspace, transpose_nullspace=Z_nullspace)
+                             cartesian=True)
+  #                           nullspace=Z_nullspace, transpose_nullspace=Z_nullspace)
 
 
 
