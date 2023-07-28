@@ -42,12 +42,12 @@ Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
 #eta_nullspace=VectorSpaceBasis(constant=True)
 
 # Write output files in VTK format:
-u_, p_ = z.split() #subfunctions  # Do this first to extract individual velocity and pressure fields.
+u_, p_ = z.subfunctions #subfunctions  # Do this first to extract individual velocity and pressure fields.
 # Next rename for output:
 u_.rename("Velocity")
 p_.rename("Pressure")
 # Create output file and select output_frequency:
-output_file = File("output_viscous_dt_0.0625tau.pvd")
+output_file = File("output_viscous_dt_0.5tau.pvd")
 
 # Stokes related constants (note that since these are included in UFL, they are wrapped inside Constant):
 Ra = Constant(0)  # Rayleigh number
@@ -66,7 +66,7 @@ n = FacetNormal(mesh)
 mu = 1e21 # Shear modulus in Pa
 tau0 = 2 * kk * mu / (rho0 * g) 
 print("tau0", tau0)
-dt = 0.0625*tau0  # Initial time-step
+dt = 0.5*tau0  # Initial time-step
 dump_period = round(tau0/dt)
 print(dump_period)
 time = 0.0
