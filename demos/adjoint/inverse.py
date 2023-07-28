@@ -129,11 +129,11 @@ def inverse(alpha_u, alpha_d, alpha_s):
 
     # Define the component terms of the overall objective functional
     smoothing = assemble(dot(grad(T_ic - T_average), grad(T_ic - T_average)) * dx)
-    norm_smoothing = assemble(dot(grad(T_average), grad(T_average)) * dx)
+    norm_smoothing = assemble(dot(grad(T_obs), grad(T_obs)) * dx)
     damping = assemble((T_ic - T_average) ** 2 * dx)
     norm_damping = assemble(T_average ** 2 * dx)
     norm_obs = assemble(T_obs ** 2 * dx)
-    norm_u_surface = assemble(u_obs ** 2 * ds_t)  # Using final observed surface velocity
+    norm_u_surface = assemble(dot(u_obs, u_obs) * ds_t)
 
     # Temperature misfit between solution and observation
     t_misfit = assemble((T - T_obs) ** 2 * dx)
