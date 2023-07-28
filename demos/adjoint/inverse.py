@@ -6,7 +6,7 @@ dx = dx(degree=6)
 
 
 def main():
-    inverse(alpha_u=1.0, alpha_d=1.0, alpha_s=1.0)
+    inverse(alpha_u=1e-1, alpha_d=1e-2, alpha_s=1e-1)
 
 
 def inverse(alpha_u, alpha_d, alpha_s):
@@ -128,10 +128,10 @@ def inverse(alpha_u, alpha_d, alpha_s):
     checkpoint_file.close()
 
     # Define the component terms of the overall objective functional
-    smoothing = assemble(dot(grad(T_ic - T_average), grad(T_ic - T_average)) * dx)
-    norm_smoothing = assemble(dot(grad(T_obs), grad(T_obs)) * dx)
     damping = assemble((T_ic - T_average) ** 2 * dx)
     norm_damping = assemble(T_average ** 2 * dx)
+    smoothing = assemble(dot(grad(T_ic - T_average), grad(T_ic - T_average)) * dx)
+    norm_smoothing = assemble(dot(grad(T_obs), grad(T_obs)) * dx)
     norm_obs = assemble(T_obs ** 2 * dx)
     norm_u_surface = assemble(dot(u_obs, u_obs) * ds_t)
 
@@ -141,8 +141,8 @@ def inverse(alpha_u, alpha_d, alpha_s):
     objective = (
         t_misfit +
         alpha_u * (norm_obs * u_misfit / max_timesteps / norm_u_surface) +
-        alpha_s * (norm_obs * smoothing / norm_smoothing) +
-        alpha_d * (norm_obs * damping / norm_damping)
+        alpha_d * (norm_obs * damping / norm_damping) +
+        alpha_s * (norm_obs * smoothing / norm_smoothing)
     )
 
     # All done with the forward run, stop annotating anything else to the tape
