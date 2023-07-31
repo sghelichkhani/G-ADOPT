@@ -1,143 +1,194 @@
 from gadopt import *
-from firedrake_adjoint import *
+from gadopt.inverse import *
 import numpy as np
 
-dx = dx(degree=6)
 
-with CheckpointFile("mesh.h5", "r") as f:
-    mesh = f.load_mesh("firedrake_default_extruded")
+def main():
+    for case in ["damping", "smoothing", "Tobs", "uobs"]:
+        try:
+            all_taylor_tests(case)
+        except Exception:
+            raise Exception(f"Taylor test for case {case} failed!")
 
-bottom_id, top_id = "bottom", "top"
-left_id, right_id = 1, 2
 
-domain_volume = assemble(1*dx(domain=mesh))
+def all_taylor_tests(case):
 
-# Set up function spaces for the Q2Q1 pair
-V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
-W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
-Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
-Q1 = FunctionSpace(mesh, "CG", 1)  # Average temperature function space (scalar, P1)
-Z = MixedFunctionSpace([V, W])
+    # Make sure we start from a clean tape
+    tape = get_working_tape()
+    tape.clear_tape()
 
-q = TestFunction(Q)
-q1 = TestFunction(Q1)
+    with CheckpointFile("mesh.h5", "r") as f:
+        mesh = f.load_mesh("firedrake_default_extruded")
 
-z = Function(Z)  # A field over the mixed function space Z
-u, p = z.subfunctions  # Symbolic UFL expressions for u and p
-u.rename("Velocity")
-p.rename("Pressure")
+    bottom_id, top_id = "bottom", "top"
+    left_id, right_id = 1, 2
 
-# Without a restart to continue from, our initial guess is the final state of the forward run
-# We need to project the state from Q2 into Q1
-T_ic = Function(Q1, name="Initial Temperature")
-with CheckpointFile("final_state.h5", "r") as f:
-    T_ic.project(f.load_function(mesh, "Temperature"))
+    # Set up function spaces for the Q2Q1 pair
+    V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
+    W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
+    Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
+    Q1 = FunctionSpace(mesh, "CG", 1)  # Average temperature function space (scalar, P1)
+    Z = MixedFunctionSpace([V, W])
 
-T = Function(Q, name="Temperature")
+    q = TestFunction(Q)
+    q1 = TestFunction(Q1)
 
-u_ref = Function(V, name="Reference Velocity")
-u_ref.assign(Constant(0.0))
+    z = Function(Z)  # A field over the mixed function space Z
+    u, p = split(z)  # Symbolic UFL expressions for u and p
 
-Ra = Constant(1e6)
-approximation = BoussinesqApproximation(Ra)
+    # spliting z space to acces velocity and pressure
+    u, p = z.split()
+    u.rename("Velocity")
+    p.rename("Pressure")
 
-delta_t = Constant(4e-6)  # Constant time step
-max_timesteps = 80
-time = 0.0
+    # Without a restart to continue from, our initial guess is the final state of the forward run
+    # We need to project the state from Q2 into Q1
+    Tic = Function(Q1, name="Initial Temperature")
 
-Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
+    # Temperature function
+    T = Function(Q, name="Temperature")
 
-# Imposed velocity boundary condition on top, free-slip on other sides
-stokes_bcs = {
-    bottom_id: {"uy": 0},
-    top_id: {"u": u_ref},
-    left_id: {"ux": 0},
-    right_id: {"ux": 0},
-}
-temp_bcs = {
-    top_id: {"T": 0.0},
-    bottom_id: {"T": 1.0},
-}
-temp_bcs_q1 = [
-    DirichletBC(Q1, 0.0, top_id),
-    DirichletBC(Q1, 1.0, bottom_id),
-]
+    Ra = Constant(1e6)
+    approximation = BoussinesqApproximation(Ra)
 
-energy_solver = EnergySolver(
-    T,
-    u,
-    approximation,
-    delta_t,
-    ImplicitMidpoint,
-    bcs=temp_bcs,
-)
-Told = energy_solver.T_old
-Ttheta = 0.5*T + 0.5*Told
+    delta_t = Constant(4e-6)  # Constant time step
+    max_timesteps = 80
+    init_timestep = 0 if case in ["Tobs", "uobs"] else max_timesteps
 
-stokes_solver = StokesSolver(
-    z,
-    Ttheta,
-    approximation,
-    bcs=stokes_bcs,
-    nullspace=Z_nullspace,
-    transpose_nullspace=Z_nullspace,
-)
+    Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
 
-# Define a simple problem to apply the imposed boundary condition to the IC
-T_ = Function(Q1)
-bc_problem = LinearVariationalProblem(
-    q1 * TrialFunction(Q1) * dx,
-    q1 * T_ * dx,
-    T_ic,
-    bcs=temp_bcs_q1,
-)
-bc_solver = LinearVariationalSolver(bc_problem)
+    # the initial guess for the control
+    with CheckpointFile("Checkpoint_State.h5", "r") as f:
+        Tic.project(f.load_function(mesh, "Temperature", idx=max_timesteps - 1))
 
-# Project the initial condition from Q1 to Q
-ic_projection_problem = LinearVariationalProblem(
-    q * TrialFunction(Q) * dx,
-    q * T_ic * dx,
-    Told,
-    bcs=energy_solver.strong_bcs,
-)
-ic_projection_solver = LinearVariationalSolver(ic_projection_problem)
+    # Imposed velocity boundary condition on top, free-slip on other sides
+    stokes_bcs = {
+        bottom_id: {"uy": 0},
+        top_id: {"uy": 0},
+        left_id: {"ux": 0},
+        right_id: {"ux": 0},
+    }
+    temp_bcs = {
+        top_id: {"T": 0.0},
+        bottom_id: {"T": 1.0},
+    }
+    temp_bcs_q1 = [
+        DirichletBC(Q1, 0.0, top_id),
+        DirichletBC(Q1, 1.0, bottom_id),
+    ]
 
-# Control variable for optimisation
-control = Control(T_ic)
+    energy_solver = EnergySolver(
+        T,
+        u,
+        approximation,
+        delta_t,
+        ImplicitMidpoint,
+        bcs=temp_bcs,
+    )
 
-# Apply the boundary condition to the control
-# and obtain the initial condition
-T_.assign(T_ic)
-bc_solver.solve()
-ic_projection_solver.solve()
-T.assign(Told)
+    stokes_solver = StokesSolver(
+        z,
+        T,
+        approximation,
+        bcs=stokes_bcs,
+        nullspace=Z_nullspace,
+        transpose_nullspace=Z_nullspace,
+    )
 
-u_checkpoint = CheckpointFile("reference_velocity.h5", "r")
+    # Define a simple problem to apply the imposed boundary condition to the IC
+    T_ = Function(Tic.function_space())
+    bc_problem = LinearVariationalProblem(
+        q1 * TrialFunction(Tic.function_space()) * dx,
+        q1 * T_ * dx,
+        Tic,
+        bcs=temp_bcs_q1,
+    )
+    bc_solver = LinearVariationalSolver(bc_problem)
 
-# Populate the tape by running the forward simulation
-for timestep in range(0, max_timesteps):
-    stokes_solver.solve()
-    energy_solver.solve()
-    time += float(delta_t)
+    # Project the initial condition from Q1 to Q
+    ic_projection_problem = LinearVariationalProblem(
+        q * TrialFunction(Q) * dx,
+        q * Tic * dx,
+        T,
+        bcs=energy_solver.strong_bcs,
+    )
+    ic_projection_solver = LinearVariationalSolver(ic_projection_problem)
 
-    average_temperature = assemble(T * dx) / domain_volume
-    log(f"{timestep} {time:.02e} {average_temperature:.1e}")
+    # Control variable for optimisation
+    control = Control(Tic)
 
-    # load the reference velocity for the next timestep since this is
-    # saved after the solves in the forward run, we reload after the
-    # solves here
-    u_ref.assign(u_checkpoint.load_function(mesh, name="Velocity", idx=timestep))
+    # Apply the boundary condition to the control
+    # and obtain the initial condition
+    T_.assign(Tic)
+    bc_solver.solve()
+    ic_projection_solver.solve()
 
-with CheckpointFile("final_state.h5", "r") as f:
-    T_reference = f.load_function(mesh, "Temperature")
-    T_reference.rename("Reference Temperature")
+    checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
 
-t_misfit = assemble(0.5 * (T - T_reference) ** 2 * dx)
-reduced_functional = ReducedFunctional(t_misfit, control)
+    u_misfit = 0.0
 
-# All done with the forward run, stop annotating anything else to the tape
-pause_annotation()
+    # Populate the tape by running the forward simulation
+    for timestep in range(init_timestep, max_timesteps):
+        stokes_solver.solve()
 
-delta_T = Function(Q1, name="Delta Temperature")
-delta_T.dat.data[:] = np.random.random(delta_T.dat.data.shape)
-log(taylor_test(reduced_functional, T_ic, delta_T))
+        # load the reference velocity
+        uobs = checkpoint_file.load_function(
+            mesh,
+            name="Velocity",
+            idx=timestep)
+        u_misfit += assemble(0.5 * (uobs - u)**2 * ds_t)
+        energy_solver.solve()
+
+    # Load the observed final state
+    Tobs = checkpoint_file.load_function(mesh, "Temperature", idx=max_timesteps - 1)
+    Tobs.rename("ObservedTemperature")
+
+    # Load the average temperature profile
+    Taverage = checkpoint_file.load_function(mesh, "Average Temperature", idx=0)
+    Taverage.rename("AverageTemperature")
+
+    checkpoint_file.close()
+
+    if case == "smoothing":
+        norm_grad_Taverage = assemble(
+            0.5*dot(grad(Taverage), grad(Taverage)) * dx)
+        objective = 0.5 * assemble(dot(grad(Tic-Taverage), grad(Tic-Taverage)) * dx) / norm_grad_Taverage
+    elif case == "damping":
+        norm_Tavereage = assemble(
+            0.5*(Taverage)**2 * dx)
+        objective = 0.5 * assemble((Tic - Taverage)**2 * dx) / norm_Tavereage
+    elif case == "Tobs":
+        norm_final_state = assemble(
+            0.5*(Tobs)**2 * dx)
+        objective = 0.5 * assemble((T - Tobs)**2 * dx) / norm_final_state
+    else:
+        norm_u_surface = assemble(
+            0.5 * (uobs)**2 * ds_t)
+        objective = u_misfit / (max_timesteps) / norm_u_surface
+
+    # All done with the forward run, stop annotating anything else to the tape
+    pause_annotation()
+
+    reduced_functional = ReducedFunctional(objective, control)
+
+    delta_T = Function(Q1, name="Delta Temperature")
+    delta_T.dat.data[:] = np.random.random(delta_T.dat.data.shape)
+    minconv = taylor_test(reduced_functional, Tic, delta_T)
+
+    log(
+        (
+            "\n\nEnd of Taylor Test ****: "
+            f"case: {case}"
+            f"conversion: {minconv:.8e}\n\n\n"
+        )
+    )
+
+    # make sure we keep annotating after this
+    continue_annotation()
+
+    # Making sure test results are satisfied
+    assert minconv > 1.9
+
+
+if __name__ == "__main__":
+    main()
