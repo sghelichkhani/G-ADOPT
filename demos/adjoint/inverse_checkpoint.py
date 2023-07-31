@@ -28,6 +28,8 @@ def inverse(alpha_u, alpha_d, alpha_s):
     with CheckpointFile("Checkpoint_State.h5", "r") as f:
         mesh = f.load_mesh("firedrake_default_extruded")
 
+    enable_disk_checkpointing()
+
     bottom_id, top_id = "bottom", "top"
     left_id, right_id = 1, 2
 
@@ -151,8 +153,8 @@ def inverse(alpha_u, alpha_d, alpha_s):
     reduced_functional = ReducedFunctional(objective, control)
 
     def callback():
-        initial_misfit = assemble((T_ic.block_variable.checkpoint - T_ic_ref) ** 2 * dx)
-        final_misfit = assemble((T.block_variable.checkpoint - T_obs) ** 2 * dx)
+        initial_misfit = assemble((T_ic.block_variable.checkpoint.restore() - T_ic_ref) ** 2 * dx)
+        final_misfit = assemble((T.block_variable.checkpoint.restore() - T_obs) ** 2 * dx)
 
         log(f"Initial misfit; {initial_misfit}; final misfit: {final_misfit}")
 
@@ -168,6 +170,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
     optimiser = LinMoreOptimiser(
         minimisation_problem,
         minimisation_parameters,
+        checkpoint_dir="optimisation_checkpoint"
     )
     optimiser.add_callback(callback)
     optimiser.run()

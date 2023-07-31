@@ -1,13 +1,12 @@
 from gadopt import *
 import numpy as np
 
-dx = dx(degree=6)
-
-# Thermal boundary layer thickness
-thickness_val = 3
-
+# Domain extents
 x_max = 1.0
 y_max = 1.0
+
+# Thermal boundary layer thickness
+boundary_thickness = 3.0
 
 # Number of intervals along x direction
 disc_n = 150
@@ -21,14 +20,8 @@ mesh = ExtrudedMesh(
     layer_height=y_max / disc_n,
     extrusion_type="uniform"
 )
-
-with CheckpointFile("mesh.h5", "w") as f:
-    f.save_mesh(mesh)
-
 bottom_id, top_id = "bottom", "top"
 left_id, right_id = 1, 2
-
-domain_volume = assemble(1*dx(domain=mesh))
 
 # Set up function spaces for the Q2Q1 pair
 V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
@@ -45,7 +38,7 @@ p.rename("Pressure")
 T = Function(Q, name="Temperature")
 X = SpatialCoordinate(mesh)
 T.interpolate(
-    0.5 * (erf((1 - X[1]) * thickness_val) + erf(-X[1] * thickness_val) + 1) +
+    0.5 * (erf((1 - X[1]) * boundary_thickness) + erf(-X[1] * boundary_thickness) + 1) +
     0.1 * exp(-0.5 * ((X - as_vector((0.5, 0.2))) / Constant(0.1)) ** 2)
 )
 
@@ -58,9 +51,9 @@ averager.extrapolate_layer_average(
     averager.get_layer_average(T)
 )
 
-with CheckpointFile("initial_state.h5", "w") as f:
-    f.save_mesh(mesh)
-    f.save_function(T_average)
+checkpoint_file = CheckpointFile("Checkpoint_State.h5", "w")
+checkpoint_file.save_mesh(mesh)
+checkpoint_file.save_function(T_average, idx=0)
 
 Ra = Constant(1e6)
 approximation = BoussinesqApproximation(Ra)
@@ -101,27 +94,20 @@ stokes_solver = StokesSolver(
     transpose_nullspace=Z_nullspace
 )
 
-output_file = File("visualisation/output_forward.pvd")
+output_file = File("vtu-files/output.pvd")
 dump_period = 10
-
-u_checkpoint = CheckpointFile("reference_velocity.h5", "w")
-u_checkpoint.save_mesh(mesh)
 
 for timestep in range(0, max_timesteps):
     stokes_solver.solve()
     energy_solver.solve()
     time += float(delta_t)
 
-    average_temperature = assemble(T * dx) / domain_volume
-    log(f"{timestep} {time:.02e} {average_temperature:.1e}")
+    # Storing velocity to be used in the objective F
+    checkpoint_file.save_function(u, idx=timestep)
 
-    u_checkpoint.save_function(u, idx=timestep)
-
-    if timestep % dump_period == 0 or timestep == max_timesteps-1:
+    if timestep % dump_period == 0 or timestep == max_timesteps - 1:
         output_file.write(u, p, T)
 
-u_checkpoint.close()
-
-with CheckpointFile("final_state.h5", "w") as f:
-    f.save_mesh(mesh)
-    f.save_function(T)
+# Save the reference final temperature
+checkpoint_file.save_function(T, idx=max_timesteps - 1)
+checkpoint_file.close()

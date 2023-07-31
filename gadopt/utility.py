@@ -4,6 +4,7 @@ A module with utitity functions for gadopt
 from firedrake import outer, ds_v, ds_t, ds_b, CellDiameter, CellVolume, dot, JacobianInverse
 from firedrake import sqrt, Function, FiniteElement, TensorProductElement, FunctionSpace, VectorFunctionSpace
 from firedrake import as_vector, SpatialCoordinate, Constant, max_value, min_value, dx, assemble, exp
+from firedrake import as_vector, SpatialCoordinate, Constant, max_value, min_value, dx, assemble
 import ufl
 from ufl.corealg.traversal import traverse_unique_terminals
 from firedrake.petsc import PETSc
@@ -12,6 +13,7 @@ import numpy as np
 import logging
 from logging import DEBUG, INFO, WARNING, ERROR, CRITICAL  # NOQA
 import os
+from scipy.linalg import solveh_banded
 from scipy.linalg import solveh_banded
 
 
@@ -96,6 +98,7 @@ class CombinedSurfaceMeasure(ufl.Measure):
     A surface measure that combines ds_v, the integral over vertical boundary facets, and ds_t and ds_b,
     the integral over horizontal top and bottom facets. The vertical boundary facets are identified with
     the same surface ids as ds_v. The top and bottom surfaces are identified via the "top" and "bottom" ids."""
+
     def __init__(self, domain, degree):
         self.ds_v = ds_v(domain=domain, degree=degree)
         self.ds_t = ds_t(domain=domain, degree=degree)
@@ -258,6 +261,7 @@ class ExtrudedFunction(Function):
     The 3D function resides in V x R function space, where V is the function
     space of the source function. The 3D function shares the data of the 2D
     function."""
+
     def __init__(self, *args, mesh_3d=None, **kwargs):
         """
         Create a 2D :class:`Function` with a 3D view on extruded mesh.
@@ -429,7 +433,3 @@ class LayerAveraging:
         phi = max_value(min_value(1, (r - rp) / (rn - rp)), 0)
         val.assign(avg[-1])
         u.interpolate(u + val * phi)
-
-
-def gaussian(r, r_0, sigma):
-    return exp(-0.5 * (r - r_0)**2 / sigma**2)
