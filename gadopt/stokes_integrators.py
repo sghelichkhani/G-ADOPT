@@ -57,7 +57,7 @@ def create_stokes_nullspace(Z, closed=True, rotational=False, translations=None)
     """
     X = fd.SpatialCoordinate(Z.mesh())
     dim = len(X)
-    V, W = Z.split() #subfunctions
+    V, W = Z.subfunctions
     if rotational:
         if dim == 2:
             rotV = fd.Function(V).interpolate(fd.as_vector((-X[1], X[0])))
@@ -96,7 +96,7 @@ class StokesSolver:
 
     def __init__(self, z, T, approximation, bcs=None, mu=1, previous_stress=1,
                  quad_degree=6, cartesian=True, solver_parameters=None,
-                 closed=True, rotational=False, J=None,
+                 closed=True, rotational=False, J=None, additional_fields={},
                  **kwargs):
         self.Z = z.function_space()
         self.mesh = self.Z.mesh()
@@ -113,6 +113,7 @@ class StokesSolver:
         self.solver_kwargs = kwargs
         u, p = fd.split(self.solution)
         self.k = upward_normal(self.Z.mesh(), cartesian)
+        
         self.fields = {
             'velocity': u,
             'pressure': p,
@@ -120,10 +121,13 @@ class StokesSolver:
             'interior_penalty': fd.Constant(6.25),  # matches C_ip=100. in "old" code for Q2Q1 in 2d
             'source': self.approximation.buoyancy(p, T) * self.k,
             'rho_continuity': self.approximation.rho_continuity(),
-            'surface_id': 4, # VERY HACKY!
-            'previous_stress': previous_stress, # VERY HACKY!
-            'rhog': 45000 # Incredibly hacky! rho*g
-        }
+                }
+        # not sure if below is the best way to add new fields from the runscript 
+        # 
+        for key, value in additional_fields.items():
+            self.fields[key] = value
+
+
 
         self.weak_bcs = {}
         self.strong_bcs = []
