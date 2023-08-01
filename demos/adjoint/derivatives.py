@@ -1,9 +1,5 @@
 from gadopt import *
 from gadopt.inverse import *
-import numpy as np
-
-ds_t = ds_t(degree=6)
-dx = dx(degree=6)
 
 
 def main():
@@ -15,14 +11,15 @@ def main():
 
 
 def all_taylor_tests(case):
-    # Clear the tape of any previous operations to ensure
-    # the adjoint reflects the forward problem we solve here
+
+    # Make sure we start from a clean tape
     tape = get_working_tape()
     tape.clear_tape()
 
     with CheckpointFile("mesh.h5", "r") as f:
         mesh = f.load_mesh("firedrake_default_extruded")
 
+    # to enable checkpointing to disk
     enable_disk_checkpointing(dirname="./test/")
 
     bottom_id, top_id = "bottom", "top"
@@ -143,23 +140,18 @@ def all_taylor_tests(case):
 
     reduced_functional = ReducedFunctional(objective, control)
 
-    delta_T = Function(Q1, name="Delta Temperature")
-    delta_T.dat.data[:] = np.random.random(delta_T.dat.data.shape)
-    minconv = taylor_test(reduced_functional, Tic, delta_T)
-
-    log(
-        (
-            "\n\nEnd of Taylor Test ****: "
-            f"case: {case}"
-            f"conversion: {minconv:.8e}\n\n\n"
-        )
+    # computing and storing the derivative
+    derivative = reduced_functional.derivative(
+        options={'riesz_representation': "L2"}
     )
+    derivative.rename("derivative")
+
+    # writing out derivative
+    fi = File(f"derivative-{case}/derivative.pvd")
+    fi.write(derivative)
 
     # make sure we keep annotating after this
     continue_annotation()
-
-    # Making sure test results are satisfied
-    assert minconv > 1.9
 
 
 if __name__ == "__main__":

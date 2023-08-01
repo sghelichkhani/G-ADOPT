@@ -55,7 +55,6 @@ def run_forward():
 
     delta_t = Constant(4e-6)  # Constant time step
     max_timesteps = 80
-    time = 0.0
 
     Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
 
@@ -95,7 +94,6 @@ def run_forward():
     for timestep in range(0, max_timesteps):
         stokes_solver.solve()
         energy_solver.solve()
-        time += float(delta_t)
 
         # Storing velocity to be used in the objective F
         checkpoint_file.save_function(u, idx=timestep)
