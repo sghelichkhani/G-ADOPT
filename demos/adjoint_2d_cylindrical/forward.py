@@ -62,7 +62,7 @@ def step_func(centre, mag, increasing=True, sharpness=50):
     return mag * (0.5 * (1 + tanh((1 if increasing else -1)*(r-centre)*sharpness)))
 
 
-# From this point, we define a depth-dependent viscosity mu
+# From this point, we define a depth-dependent viscosity mu_lin
 mu_lin = 2.0
 
 # Assemble the depth dependence
@@ -106,9 +106,8 @@ Z_near_nullspace = create_stokes_nullspace(Z, closed=False, rotational=True, tra
 
 # Create output file and select output_frequency
 output_file = File("vtu-files/output.pvd")
+
 dump_period = 10
-# Frequency of checkpoint files
-checkpoint_period = dump_period * 4
 
 temp_bcs = {
     "bottom": {"T": 1.0},
@@ -135,7 +134,8 @@ stokes_solver = StokesSolver(
 
 checkpoint_file = CheckpointFile("Checkpoint_State.h5", "w")
 checkpoint_file.save_mesh(mesh)
-checkpoint_file.save_function(Taverage, name="AverageTemperature", idx=0)
+checkpoint_file.save_function(Taverage, name="Average Temperature", idx=0)
+checkpoint_file.save_function(T, name="Temperature", idx=0)
 
 # Split and rename the velocity and pressure functions
 # so that they can be used for visualisation
