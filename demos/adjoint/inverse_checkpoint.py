@@ -55,9 +55,9 @@ def inverse(alpha_u, alpha_d, alpha_s):
 
     # Without a restart to continue from, our initial guess is the final state of the forward run
     # We need to project the state from Q2 into Q1
-    T_ic = Function(Q1, name="Initial Temperature")
+    Tic = Function(Q1, name="Initial Temperature")
     with CheckpointFile("Checkpoint_State.h5", "r") as f:
-        T_ic.project(f.load_function(mesh, "Temperature", idx=max_timesteps - 1))
+        Tic.project(f.load_function(mesh, "Temperature", idx=max_timesteps - 1))
 
     # Temperature function in Q2, where we solve the equations
     T = Function(Q, name="Temperature")
@@ -93,14 +93,14 @@ def inverse(alpha_u, alpha_d, alpha_s):
     )
 
     # Control variable for optimisation
-    control = Control(T_ic)
+    control = Control(Tic)
 
     checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
     u_misfit = 0
 
     # We need to project the initial condition from Q1 to Q2,
     # and impose the boundary conditions at the same time
-    T.project(T_ic, bcs=energy_solver.strong_bcs)
+    T.project(Tic, bcs=energy_solver.strong_bcs)
 
     # Populate the tape by running the forward simulation
     for timestep in range(init_timestep, max_timesteps):
@@ -121,8 +121,8 @@ def inverse(alpha_u, alpha_d, alpha_s):
 
     # Load the reference initial state
     # Needed to measure performance of weightings
-    T_ic_ref = checkpoint_file.load_function(mesh, "Temperature", idx=0)
-    T_ic_ref.rename("Reference Initial Temperature")
+    Tic_ref = checkpoint_file.load_function(mesh, "Temperature", idx=0)
+    Tic_ref.rename("Reference Initial Temperature")
 
     # Load the average temperature profile
     T_average = checkpoint_file.load_function(mesh, "Average Temperature", idx=0)
@@ -130,9 +130,9 @@ def inverse(alpha_u, alpha_d, alpha_s):
     checkpoint_file.close()
 
     # Define the component terms of the overall objective functional
-    damping = assemble((T_ic - T_average) ** 2 * dx)
+    damping = assemble((Tic - T_average) ** 2 * dx)
     norm_damping = assemble(T_average ** 2 * dx)
-    smoothing = assemble(dot(grad(T_ic - T_average), grad(T_ic - T_average)) * dx)
+    smoothing = assemble(dot(grad(Tic - T_average), grad(Tic - T_average)) * dx)
     norm_smoothing = assemble(dot(grad(T_obs), grad(T_obs)) * dx)
     norm_obs = assemble(T_obs ** 2 * dx)
     norm_u_surface = assemble(dot(u_obs, u_obs) * ds_t)
@@ -153,7 +153,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
     reduced_functional = ReducedFunctional(objective, control)
 
     def callback():
-        initial_misfit = assemble((T_ic.block_variable.checkpoint.restore() - T_ic_ref) ** 2 * dx)
+        initial_misfit = assemble((Tic.block_variable.checkpoint.restore() - Tic_ref) ** 2 * dx)
         final_misfit = assemble((T.block_variable.checkpoint.restore() - T_obs) ** 2 * dx)
 
         log(f"Initial misfit; {initial_misfit}; final misfit: {final_misfit}")

@@ -20,6 +20,8 @@ def all_taylor_tests(case):
     with CheckpointFile("mesh.h5", "r") as f:
         mesh = f.load_mesh("firedrake_default_extruded")
 
+    enable_disk_checkpointing(dirname="./test/")
+
     bottom_id, top_id = "bottom", "top"
     left_id, right_id = 1, 2
 
@@ -30,16 +32,8 @@ def all_taylor_tests(case):
     Q1 = FunctionSpace(mesh, "CG", 1)  # Average temperature function space (scalar, P1)
     Z = MixedFunctionSpace([V, W])
 
-    q = TestFunction(Q)
-    q1 = TestFunction(Q1)
-
     z = Function(Z)  # A field over the mixed function space Z
     u, p = split(z)  # Symbolic UFL expressions for u and p
-
-    # spliting z space to acces velocity and pressure
-    u, p = z.split()
-    u.rename("Velocity")
-    p.rename("Pressure")
 
     # Without a restart to continue from, our initial guess is the final state of the forward run
     # We need to project the state from Q2 into Q1
@@ -72,10 +66,6 @@ def all_taylor_tests(case):
         top_id: {"T": 0.0},
         bottom_id: {"T": 1.0},
     }
-    temp_bcs_q1 = [
-        DirichletBC(Q1, 0.0, top_id),
-        DirichletBC(Q1, 1.0, bottom_id),
-    ]
 
     energy_solver = EnergySolver(
         T,
@@ -95,37 +85,16 @@ def all_taylor_tests(case):
         transpose_nullspace=Z_nullspace,
     )
 
-    # Define a simple problem to apply the imposed boundary condition to the IC
-    T_ = Function(Tic.function_space())
-    bc_problem = LinearVariationalProblem(
-        q1 * TrialFunction(Tic.function_space()) * dx,
-        q1 * T_ * dx,
-        Tic,
-        bcs=temp_bcs_q1,
-    )
-    bc_solver = LinearVariationalSolver(bc_problem)
-
-    # Project the initial condition from Q1 to Q
-    ic_projection_problem = LinearVariationalProblem(
-        q * TrialFunction(Q) * dx,
-        q * Tic * dx,
-        T,
-        bcs=energy_solver.strong_bcs,
-    )
-    ic_projection_solver = LinearVariationalSolver(ic_projection_problem)
-
     # Control variable for optimisation
     control = Control(Tic)
-
-    # Apply the boundary condition to the control
-    # and obtain the initial condition
-    T_.assign(Tic)
-    bc_solver.solve()
-    ic_projection_solver.solve()
 
     checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
 
     u_misfit = 0.0
+
+    # We need to project the initial condition from Q1 to Q2,
+    # and impose the boundary conditions at the same time
+    T.project(Tic, bcs=energy_solver.strong_bcs)
 
     # Populate the tape by running the forward simulation
     for timestep in range(init_timestep, max_timesteps):
