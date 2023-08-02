@@ -8,12 +8,9 @@ def main():
 
 
 def run_forward():
-
-    with CheckpointFile("mesh.h5", mode="r") as fi:
-        mesh = fi.load_mesh("firedrake_default_extruded")
-
-    bottom_id, top_id = "bottom", "top"
-    left_id, right_id = 1, 2
+    # Start with a previously-initialised temperature field
+    with CheckpointFile("mesh.h5", mode="r") as f:
+        mesh = f.load_mesh("firedrake_default_extruded")
 
     # Set up function spaces for the Q2Q1 pair
     V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
@@ -30,27 +27,24 @@ def run_forward():
     T = Function(Q, name="Temperature")
     X = SpatialCoordinate(mesh)
     T.interpolate(
-        0.5 * (erf((1 - X[1]) * 3.0) + erf(-X[1] * 3.0) + 1) +
-        0.1 * exp(-0.5 * ((X - as_vector((0.5, 0.2))) / Constant(0.1)) ** 2)
+        0.5 * (erf((1 - X[1]) * 3.0) + erf(-X[1] * 3.0) + 1)
+        + 0.1 * exp(-0.5 * ((X - as_vector((0.5, 0.2))) / Constant(0.1)) ** 2)
     )
 
-    T_average = Function(Q1, name="Average Temperature")
+    Taverage = Function(Q1, name="Average Temperature")
 
     # Calculate the layer average of the initial state
     averager = LayerAveraging(
-        mesh,
-        np.linspace(0, 1.0, 150*2),
-        cartesian=True, quad_degree=6)
-    averager.extrapolate_layer_average(
-        T_average,
-        averager.get_layer_average(T)
+        mesh, np.linspace(0, 1.0, 150 * 2), cartesian=True, quad_degree=6
     )
+    averager.extrapolate_layer_average(Taverage, averager.get_layer_average(T))
 
     checkpoint_file = CheckpointFile("Checkpoint_State.h5", "w")
     checkpoint_file.save_mesh(mesh)
-    checkpoint_file.save_function(T_average, idx=0)
+    checkpoint_file.save_function(Taverage, name="Average Temperature", idx=0)
+    checkpoint_file.save_function(T, name="Temperature", idx=0)
 
-    Ra = Constant(1e6)
+    Ra = Constant(1e6)  # Rayleigh number
     approximation = BoussinesqApproximation(Ra)
 
     delta_t = Constant(4e-6)  # Constant time step
@@ -60,23 +54,18 @@ def run_forward():
 
     # Free-slip velocity boundary condition on all sides
     stokes_bcs = {
-        bottom_id: {"uy": 0},
-        top_id: {"uy": 0},
-        left_id: {"ux": 0},
-        right_id: {"ux": 0},
+        "bottom": {"uy": 0},
+        "top": {"uy": 0},
+        1: {"ux": 0},
+        2: {"ux": 0},
     }
     temp_bcs = {
-        top_id: {"T": 0.0},
-        bottom_id: {"T": 1.0},
+        "bottom": {"T": 1.0},
+        "top": {"T": 0.0},
     }
 
     energy_solver = EnergySolver(
-        T,
-        u,
-        approximation,
-        delta_t,
-        ImplicitMidpoint,
-        bcs=temp_bcs
+        T, u, approximation, delta_t, ImplicitMidpoint, bcs=temp_bcs
     )
 
     stokes_solver = StokesSolver(
@@ -85,24 +74,25 @@ def run_forward():
         approximation,
         bcs=stokes_bcs,
         nullspace=Z_nullspace,
-        transpose_nullspace=Z_nullspace
+        transpose_nullspace=Z_nullspace,
     )
 
+    # Create output file and select output_frequency
     output_file = File("vtu-files/output.pvd")
     dump_period = 10
-
+    # Now perform the time loop:
     for timestep in range(0, max_timesteps):
         stokes_solver.solve()
         energy_solver.solve()
 
         # Storing velocity to be used in the objective F
-        checkpoint_file.save_function(u, idx=timestep)
+        checkpoint_file.save_function(u, name="Velocity", idx=timestep)
 
         if timestep % dump_period == 0 or timestep == max_timesteps - 1:
             output_file.write(u, p, T)
 
     # Save the reference final temperature
-    checkpoint_file.save_function(T, idx=max_timesteps - 1)
+    checkpoint_file.save_function(T, name="Temperature", idx=max_timesteps - 1)
     checkpoint_file.close()
 
 
@@ -117,14 +107,11 @@ def generate_mesh():
     # Interval mesh in x direction, to be extruded along y
     mesh1d = IntervalMesh(disc_n, length_or_left=0.0, right=x_max)
     mesh_temp = ExtrudedMesh(
-        mesh1d,
-        layers=disc_n,
-        layer_height=y_max / disc_n,
-        extrusion_type="uniform"
+        mesh1d, layers=disc_n, layer_height=y_max / disc_n, extrusion_type="uniform"
     )
 
     # write out the mesh
-    with CheckpointFile("mesh.h5", mode='w') as fi:
+    with CheckpointFile("mesh.h5", mode="w") as fi:
         fi.save_mesh(mesh_temp)
 
 
