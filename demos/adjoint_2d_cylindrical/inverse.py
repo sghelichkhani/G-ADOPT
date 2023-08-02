@@ -1,4 +1,5 @@
 from gadopt import *
+from gadopt.inverse import *
 import numpy as np
 
 ds_t = ds_t(degree=6)
@@ -53,22 +54,21 @@ def inverse(alpha_u, alpha_d, alpha_s):
     r_410 = rmax - (rmax_earth - r_410_earth)/(rmax_earth - rmin_earth)
     r_660 = rmax - (rmax_earth - r_660_earth)/(rmax_earth - rmin_earth)
 
-    # Start with a previously-initialised temperature field
-    with CheckpointFile("Checkpoint_State.h5", mode="r") as f:
+    with CheckpointFile("Checkpoint230.h5", "r") as f:
         mesh = f.load_mesh("firedrake_default_extruded")
 
     enable_disk_checkpointing()
 
-    # Set up function spaces - currently using the bilinear Q2Q1 element pair:
+    # Set up function spaces for the Q2Q1 pair
     V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
     W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
     Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
     Q1 = FunctionSpace(mesh, "CG", 1)  # Control function space
-    Z = MixedFunctionSpace([V, W])  # Mixed function space.
+    Z = MixedFunctionSpace([V, W]) # Mixed function space
 
     # Test functions and functions to hold solutions:
-    z = Function(Z)  # a field over the mixed function space Z.
-    u, p = split(z)  # Returns symbolic UFL expression for u and p
+    z = Function(Z)  # A field over the mixed function space Z
+    u, p = split(z)  # Symbolic UFL expressions for u and p
 
     X = SpatialCoordinate(mesh)
     r = sqrt(X[0]**2 + X[1]**2)
@@ -77,15 +77,25 @@ def inverse(alpha_u, alpha_d, alpha_s):
 
     # Define time stepping parameters:
     max_timesteps = 200
-    delta_t = Constant(5e-6)  # Initial time-step
+    delta_t = Constant(5e-6) # Constant time step 
 
     # Without a restart to continue from, our initial guess is the final state of the forward run
     # We need to project the state from Q2 into Q1
     Tic = Function(Q1, name="Initial Temperature")
+    Taverage = Function(Q1, name="Average Temperature")
 
-    # Checkpointfile should be changed in case of a restart
-    with CheckpointFile("Checkpoint_State.h5", "r") as f:
-        Tic.project(f.load_function(mesh, "Temperature", idx=max_timesteps - 1))
+    checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
+    # Initialise the control
+    Tic.project(checkpoint_file.load_function(
+        mesh,
+        "Temperature",
+        idx=max_timesteps-1)
+        )
+    Taverage.project(checkpoint_file.load_function(
+        mesh,
+        "Average Temperature",
+        idx=0)
+        )
 
     # Temperature function in Q2, where we solve the equations
     T = Function(Q, name="Temperature")
@@ -118,26 +128,28 @@ def inverse(alpha_u, alpha_d, alpha_s):
     mu_eff = 2 * (mu_lin * mu_plast)/(mu_lin + mu_plast)
     mu = conditional(mu_eff > 0.4, mu_eff, 0.4)
 
-    # checkpoint file for loading obs fields
-    checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
-
-    # Radial average temperature function
-    Taverage = Function(Q1, name="Average Temperature")
-
-    # defining (near-)nullspaces
+    # Nullspaces and near-nullspaces: 
     Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=True)
     Z_near_nullspace = create_stokes_nullspace(Z, closed=False, rotational=True, translations=[0, 1])
 
-    temp_bcs = {
-        "bottom": {"T": 1.0},
-        "top": {"T": 0.0},
-    }
     stokes_bcs = {
-        "bottom": {"un": 0},
         "top": {"un": 0},
+        "bottom": {"un": 0},
+    }
+    temp_bcs = {
+        "top": {"T": 0.0},
+        "bottom": {"T": 1.0},
     }
 
-    energy_solver = EnergySolver(T, u, approximation, delta_t, ImplicitMidpoint, bcs=temp_bcs)
+    energy_solver = EnergySolver(
+        T,
+        u,
+        approximation,
+        delta_t,
+        ImplicitMidpoint,
+        bcs=temp_bcs,
+    )
+
     stokes_solver = StokesSolver(
         z,
         T,
@@ -154,13 +166,13 @@ def inverse(alpha_u, alpha_d, alpha_s):
     # Control variable for optimisation
     control = Control(Tic)
 
-    u_misfit = 0
+    u_misfit = 0.0
 
     # We need to project the initial condition from Q1 to Q2,
     # and impose the boundary conditions at the same time
     T.project(Tic, bcs=energy_solver.strong_bcs)
 
-    # Now perform the time loop:
+    # Populate the tape by running the forward simulation
     for timestep in range(0, max_timesteps):
         stokes_solver.solve()
         energy_solver.solve()
@@ -208,6 +220,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
     # All done with the forward run, stop annotating anything else to the tape
     pause_annotation()
 
+    # Defining the object for pyadjoint
     reduced_functional = ReducedFunctional(objective, control)
 
     def callback():

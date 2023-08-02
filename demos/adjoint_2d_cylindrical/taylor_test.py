@@ -1,6 +1,7 @@
-from firedrake_adjoint import *
-import numpy as np
 from gadopt import *
+from gadopt.inverse import *
+import numpy as np
+
 ds_t = ds_t(degree=6)
 dx = dx(degree=6)
 
@@ -11,29 +12,40 @@ newton_stokes_solver_parameters = {
     "snes_atol": 1e-10,
     "snes_rtol": 1e-5,
     "snes_stol": 0,
-    # "snes_monitor": ':./newton.txt',
     "ksp_type": "preonly",
-    "pc_tyoe": "lu",
+    "pc_type": "lu",
     "pc_factor_mat_solver_type": "mumps",
-    # "snes_view": none,
     "snes_converged_reason": None,
-    "fiedsplit_0": {
+    "fieldsplit_0": {
         "ksp_converged_reason": None,
     },
-    "fiedsplit_1": {
+    "fieldsplit_1": {
         "ksp_converged_reason": None,
-    }}
+    },
+}
 
 
 def main():
     for case in ["damping", "smoothing", "Tobs", "uobs"]:
         try:
-            all_taylor_tests(case)
+            annulus_taylor_test(case)
         except Exception:
             raise Exception(f"Taylor test for case {case} failed!")
 
 
-def all_taylor_tests(case):
+def annulus_taylor_test(case):
+    """
+    Perform a second-order taylor remainder convergence test
+    for one term in the objective functional for the cylindrical case 
+    and asserts if convergence is above 1.9
+
+    Args:
+        case (string): name of the objective functional term
+            either of "damping", "smooothing", "Tobs", "uobs" 
+    """
+
+    # Clear the tape of any previous operations to ensure
+    # the adjoint reflects the forward problem we solve here
     tape = get_working_tape()
     tape.clear_tape()
 
@@ -46,20 +58,21 @@ def all_taylor_tests(case):
     r_410 = rmax - (rmax_earth - r_410_earth)/(rmax_earth - rmin_earth)
     r_660 = rmax - (rmax_earth - r_660_earth)/(rmax_earth - rmin_earth)
 
-    with CheckpointFile('Checkpoint230.h5', mode='r') as chckpoint:
-        mesh = chckpoint.load_mesh("firedrake_default_extruded")
+    with CheckpointFile("Checkpoint230.h5", "r") as f:
+        mesh = f.load_mesh("firedrake_default_extruded")
 
-    # enable_disk_checkpointint()
-    # Set up function spaces - currently using the bilinear Q2Q1 element pair:
+    enable_disk_checkpointing()
+
+    # Set up function spaces for the Q2Q1 pair
     V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
     W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
     Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
-    Q1 = FunctionSpace(mesh, "CG", 1)  # Control function space (scalar)
-    Z = MixedFunctionSpace([V, W])  # Mixed function space.
+    Q1 = FunctionSpace(mesh, "CG", 1)  # Control function space
+    Z = MixedFunctionSpace([V, W]) # Mixed function space
 
     # Test functions and functions to hold solutions:
-    z = Function(Z)  # a field over the mixed function space Z.
-    u, p = split(z)  # Returns symbolic UFL expression for u and p
+    z = Function(Z)  # A field over the mixed function space Z
+    u, p = split(z)  # Symbolic UFL expressions for u and p
 
     X = SpatialCoordinate(mesh)
     r = sqrt(X[0]**2 + X[1]**2)
@@ -68,22 +81,25 @@ def all_taylor_tests(case):
 
     # Define time stepping parameters:
     max_timesteps = 200
-    delta_t = Constant(5e-6)  # Initial time-step
+    delta_t = Constant(5e-6) # Constant time step 
 
     # Without a restart to continue from, our initial guess is the final state of the forward run
     # We need to project the state from Q2 into Q1
     Tic = Function(Q1, name="Initial Temperature")
+    Taverage = Function(Q1, name="Average Temperature")
 
     checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
     # Initialise the control
     Tic.project(checkpoint_file.load_function(
         mesh,
         "Temperature",
-        idx=max_timesteps-1))
-    Taverage = checkpoint_file.load_function(
+        idx=max_timesteps-1)
+        )
+    Taverage.project(checkpoint_file.load_function(
         mesh,
         "Average Temperature",
         idx=0)
+        )
 
     # Temperature function in Q2, where we solve the equations
     T = Function(Q, name="Temperature")
@@ -120,16 +136,24 @@ def all_taylor_tests(case):
     Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=True)
     Z_near_nullspace = create_stokes_nullspace(Z, closed=False, rotational=True, translations=[0, 1])
 
-    temp_bcs = {
-        "bottom": {"T": 1.0},
-        "top": {"T": 0.0},
-    }
     stokes_bcs = {
-        "bottom": {"un": 0},
         "top": {"un": 0},
+        "bottom": {"un": 0},
+    }
+    temp_bcs = {
+        "top": {"T": 0.0},
+        "bottom": {"T": 1.0},
     }
 
-    energy_solver = EnergySolver(T, u, approximation, delta_t, ImplicitMidpoint, bcs=temp_bcs)
+    energy_solver = EnergySolver(
+        T,
+        u,
+        approximation,
+        delta_t,
+        ImplicitMidpoint,
+        bcs=temp_bcs,
+    )
+
     stokes_solver = StokesSolver(
         z,
         T,
@@ -146,7 +170,7 @@ def all_taylor_tests(case):
     # Control variable for optimisation
     control = Control(Tic)
 
-    u_misfit = 0
+    u_misfit = 0.0
 
     # We need to project the initial condition from Q1 to Q2,
     # and impose the boundary conditions at the same time
@@ -155,11 +179,12 @@ def all_taylor_tests(case):
     # If it is only for smoothing or damping, there is no need to do the time-steping
     initial_timestep = 0 if case in ["Tobs", "uobs"] else max_timesteps
 
-    # Now perform the time loop:
+    # Populate the tape by running the forward simulation
     for timestep in range(initial_timestep, max_timesteps):
         stokes_solver.solve()
         energy_solver.solve()
-        # Load the velocity
+
+        # Update the accumulated surface velocity misfit using the observed value
         uobs = checkpoint_file.load_function(
             mesh,
             name="Velocity",
@@ -181,34 +206,32 @@ def all_taylor_tests(case):
 
     checkpoint_file.close()
 
+    # Define the component terms of the overall objective functional
+    damping = assemble((Tic - Taverage) ** 2 * dx)
+    norm_damping = assemble(Taverage ** 2 * dx)
+    smoothing = assemble(dot(grad(Tic - Taverage), grad(Tic - Taverage)) * dx)
+    norm_smoothing = assemble(dot(grad(Tobs), grad(Tobs)) * dx)
     norm_obs = assemble(Tobs ** 2 * dx)
+    norm_u_surface = assemble(dot(uobs, uobs) * ds_t)
 
-    if case == "smoothing":
-        norm_smoothing = assemble(
-            dot(grad(Taverage), grad(Taverage)) * dx)
-        objective = (
-            norm_obs * assemble(
-                dot(grad(Tic-Taverage), grad(Tic-Taverage)) * dx) /
-            norm_smoothing
-        )
+    # Temperature misfit between solution and observation
+    t_misfit = assemble((T - Tobs) ** 2 * dx)
+
+
+    if case == "Tobs":
+        objective = t_misfit
+    elif case == "uobs":
+        objective = (norm_obs * u_misfit / max_timesteps / norm_u_surface)
     elif case == "damping":
-        norm_damping = assemble(
-            0.5*(Taverage)**2 * dx)
-        objective = norm_obs * assemble((Tic - Taverage)**2 * dx) / norm_damping
-    elif case == "Tobs":
-        objective = assemble((T - Tobs)**2 * dx)
+        objective = (norm_obs * damping / norm_damping)
     else:
-        norm_u_surface = assemble(
-            dot(uobs, uobs) * ds_t)
-        objective = norm_obs * u_misfit / (max_timesteps) / norm_u_surface
+        objective = (norm_obs * smoothing / norm_smoothing)
 
-    # Do not annotate from here on
+    # All done with the forward run, stop annotating anything else to the tape
     pause_annotation()
 
     # Defining the object for pyadjoint
-    reduced_functional = ReducedFunctional(
-        objective,
-        control)
+    reduced_functional = ReducedFunctional(objective, control)
 
     Delta_temp = Function(Tic.function_space(), name="Delta_Temperature")
     Delta_temp.dat.data[:] = np.random.random(Delta_temp.dat.data.shape)
@@ -217,13 +240,16 @@ def all_taylor_tests(case):
     log(
         (
             "\n\nEnd of Taylor Test ****: "
-            f"case: {case}"
+            f"case: {case} "
             f"conversion: {minconv:.8e}\n\n\n"
         )
     )
-    # This is to make sure we are annotating
+    # If we're performing mulitple successive optimisations, we want
+    # to ensure the annotations are switched back on for the next code
+    # to use them
     continue_annotation()
 
+    # Making sure test results are satisfied
     assert minconv > 1.9
 
 

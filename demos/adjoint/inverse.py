@@ -25,51 +25,66 @@ def inverse(alpha_u, alpha_d, alpha_s):
     tape = get_working_tape()
     tape.clear_tape()
 
-    with CheckpointFile("Checkpoint_State.h5", "r") as f:
+    with CheckpointFile("mesh.h5", "r") as f:
         mesh = f.load_mesh("firedrake_default_extruded")
 
-    bottom_id, top_id = "bottom", "top"
-    left_id, right_id = 1, 2
+    enable_disk_checkpointing()
 
     # Set up function spaces for the Q2Q1 pair
     V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
     W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
     Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
-    Q1 = FunctionSpace(mesh, "CG", 1)  # control space (scalar, P1)
-    Z = MixedFunctionSpace([V, W])
+    Q1 = FunctionSpace(mesh, "CG", 1)  # Control function space 
+    Z = MixedFunctionSpace([V, W]) # Mixed function space
 
+    # Test functions and functions to hold solutions:
     z = Function(Z)  # A field over the mixed function space Z
     u, p = z.subfunctions
     u.rename("Velocity")
     p.rename("Pressure")
-    Ra = Constant(1e6)
+
+    Ra = Constant(1e6) # Rayleigh number
     approximation = BoussinesqApproximation(Ra)
 
-    delta_t = Constant(4e-6)  # Constant time step
+    # Define time stepping parameters:
     max_timesteps = 80
-    init_timestep = 0
-
-    Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
+    delta_t = Constant(4e-6) # Constant time step
 
     # Without a restart to continue from, our initial guess is the final state of the forward run
     # We need to project the state from Q2 into Q1
-    T_ic = Function(Q1, name="Initial Temperature")
-    with CheckpointFile("Checkpoint_State.h5", "r") as f:
-        T_ic.project(f.load_function(mesh, "Temperature", idx=max_timesteps - 1))
+    Tic = Function(Q1, name="Initial Temperature")
+    Taverage = Function(Q1, name="Average Temperature")
+
+    checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
+    # Initialise the control
+    Tic.project(checkpoint_file.load_function(
+        mesh,
+        "Temperature",
+        idx=max_timesteps-1)
+        )
+    Taverage.project(checkpoint_file.load_function(
+        mesh,
+        "Average Temperature",
+        idx=0)
+        )
 
     # Temperature function in Q2, where we solve the equations
     T = Function(Q, name="Temperature")
 
-    # Free-slip velocity boundary condition on all sides
+
+    Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
+
+
+
     stokes_bcs = {
-        bottom_id: {"uy": 0},
-        top_id: {"uy": 0},
-        left_id: {"ux": 0},
-        right_id: {"ux": 0},
+        "top": {"uy": 0},
+        "bottom": {"uy": 0},
+        1: {"ux": 0},
+        2: {"ux": 0},
     }
     temp_bcs = {
-        top_id: {"T": 0.0},
-        bottom_id: {"T": 1.0},
+        "top": {"T": 0.0},
+        "bottom": {"T": 1.0},
     }
 
     energy_solver = EnergySolver(
@@ -91,52 +106,52 @@ def inverse(alpha_u, alpha_d, alpha_s):
     )
 
     # Control variable for optimisation
-    control = Control(T_ic)
+    control = Control(Tic)
 
-    checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
-    u_misfit = 0
+    u_misfit = 0.0
 
     # We need to project the initial condition from Q1 to Q2,
     # and impose the boundary conditions at the same time
-    T.project(T_ic, bcs=energy_solver.strong_bcs)
+    T.project(Tic, bcs=energy_solver.strong_bcs)
 
     # Populate the tape by running the forward simulation
-    for timestep in range(init_timestep, max_timesteps):
+    for timestep in range(0, max_timesteps):
         stokes_solver.solve()
         energy_solver.solve()
 
         # Update the accumulated surface velocity misfit using the observed value
-        u_obs = checkpoint_file.load_function(
+        uobs = checkpoint_file.load_function(
             mesh,
             name="Velocity",
             idx=timestep
         )
-        u_misfit += assemble(dot(u - u_obs, u - u_obs) * ds_t)
+        u_misfit += assemble(dot(u - uobs, u - uobs) * ds_t)
 
     # Load the observed final state
-    T_obs = checkpoint_file.load_function(mesh, "Temperature", idx=max_timesteps - 1)
-    T_obs.rename("Observed Temperature")
+    Tobs = checkpoint_file.load_function(mesh, "Temperature", idx=max_timesteps - 1)
+    Tobs.rename("Observed Temperature")
 
     # Load the reference initial state
     # Needed to measure performance of weightings
-    T_ic_ref = checkpoint_file.load_function(mesh, "Temperature", idx=0)
-    T_ic_ref.rename("Reference Initial Temperature")
+    Tic_ref = checkpoint_file.load_function(mesh, "Temperature", idx=0)
+    Tic_ref.rename("Reference Initial Temperature")
 
     # Load the average temperature profile
-    T_average = checkpoint_file.load_function(mesh, "Average Temperature", idx=0)
+    Taverage = checkpoint_file.load_function(mesh, "Average Temperature", idx=0)
 
     checkpoint_file.close()
 
     # Define the component terms of the overall objective functional
-    damping = assemble((T_ic - T_average) ** 2 * dx)
-    norm_damping = assemble(T_average ** 2 * dx)
-    smoothing = assemble(dot(grad(T_ic - T_average), grad(T_ic - T_average)) * dx)
-    norm_smoothing = assemble(dot(grad(T_obs), grad(T_obs)) * dx)
-    norm_obs = assemble(T_obs ** 2 * dx)
-    norm_u_surface = assemble(dot(u_obs, u_obs) * ds_t)
+    damping = assemble((Tic - Taverage) ** 2 * dx)
+    norm_damping = assemble(Taverage ** 2 * dx)
+    smoothing = assemble(dot(grad(Tic - Taverage), grad(Tic - Taverage)) * dx)
+    norm_smoothing = assemble(dot(grad(Tobs), grad(Tobs)) * dx)
+    norm_obs = assemble(Tobs ** 2 * dx)
+    norm_u_surface = assemble(dot(uobs, uobs) * ds_t)
 
     # Temperature misfit between solution and observation
-    t_misfit = assemble((T - T_obs) ** 2 * dx)
+    t_misfit = assemble((T - Tobs) ** 2 * dx)
+
 
     objective = (
         t_misfit +
@@ -148,18 +163,19 @@ def inverse(alpha_u, alpha_d, alpha_s):
     # All done with the forward run, stop annotating anything else to the tape
     pause_annotation()
 
+    # Defining the object for pyadjoint
     reduced_functional = ReducedFunctional(objective, control)
 
     def callback():
-        initial_misfit = assemble((T_ic.block_variable.checkpoint - T_ic_ref) ** 2 * dx)
-        final_misfit = assemble((T.block_variable.checkpoint - T_obs) ** 2 * dx)
+        initial_misfit = assemble((Tic.block_variable.checkpoint - Tic_ref) ** 2 * dx)
+        final_misfit = assemble((T.block_variable.checkpoint - Tobs) ** 2 * dx)
 
         log(f"Initial misfit; {initial_misfit}; final misfit: {final_misfit}")
 
     # Perform a bounded nonlinear optimisation where temperature
     # is only permitted to lie in the range [0, 1]
-    T_lb = Function(Q1, name="Lower bound temperature")
-    T_ub = Function(Q1, name="Upper bound temperature")
+    T_lb = Function(Tic.function_space(), name="Lower bound temperature")
+    T_ub = Function(Tic.function_space(), name="Upper bound temperature")
     T_lb.assign(0.0)
     T_ub.assign(1.0)
 
