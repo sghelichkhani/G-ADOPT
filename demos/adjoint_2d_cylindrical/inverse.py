@@ -1,6 +1,5 @@
 from gadopt import *
 from gadopt.inverse import *
-import numpy as np
 
 ds_t = ds_t(degree=6)
 dx = dx(degree=6)
@@ -64,7 +63,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
     W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
     Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
     Q1 = FunctionSpace(mesh, "CG", 1)  # Control function space
-    Z = MixedFunctionSpace([V, W]) # Mixed function space
+    Z = MixedFunctionSpace([V, W])  # Mixed function space
 
     # Test functions and functions to hold solutions:
     z = Function(Z)  # A field over the mixed function space Z
@@ -77,7 +76,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
 
     # Define time stepping parameters:
     max_timesteps = 200
-    delta_t = Constant(5e-6) # Constant time step 
+    delta_t = Constant(5e-6)  # Constant time step
 
     # Without a restart to continue from, our initial guess is the final state of the forward run
     # We need to project the state from Q2 into Q1
@@ -86,16 +85,20 @@ def inverse(alpha_u, alpha_d, alpha_s):
 
     checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
     # Initialise the control
-    Tic.project(checkpoint_file.load_function(
-        mesh,
-        "Temperature",
-        idx=max_timesteps-1)
+    Tic.project(
+        checkpoint_file.load_function(
+            mesh,
+            "Temperature",
+            idx=max_timesteps-1
         )
-    Taverage.project(checkpoint_file.load_function(
-        mesh,
-        "Average Temperature",
-        idx=0)
+    )
+    Taverage.project(
+        checkpoint_file.load_function(
+            mesh,
+            "Average Temperature",
+            idx=0
         )
+    )
 
     # Temperature function in Q2, where we solve the equations
     T = Function(Q, name="Temperature")
@@ -128,7 +131,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
     mu_eff = 2 * (mu_lin * mu_plast)/(mu_lin + mu_plast)
     mu = conditional(mu_eff > 0.4, mu_eff, 0.4)
 
-    # Nullspaces and near-nullspaces: 
+    # Nullspaces and near-nullspaces:
     Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=True)
     Z_near_nullspace = create_stokes_nullspace(Z, closed=False, rotational=True, translations=[0, 1])
 

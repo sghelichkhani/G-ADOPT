@@ -22,7 +22,7 @@ def rectangle_taylor_test(case):
 
     Args:
         case (string): name of the objective functional term
-            either of "damping", "smooothing", "Tobs", "uobs" 
+            either of "damping", "smooothing", "Tobs", "uobs"
     """
 
     # Clear the tape of any previous operations to ensure
@@ -39,8 +39,8 @@ def rectangle_taylor_test(case):
     V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
     W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
     Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
-    Q1 = FunctionSpace(mesh, "CG", 1)  # Control function space 
-    Z = MixedFunctionSpace([V, W]) # Mixed function space
+    Q1 = FunctionSpace(mesh, "CG", 1)  # Control function space
+    Z = MixedFunctionSpace([V, W])  # Mixed function space
 
     # Test functions and functions to hold solutions:
     z = Function(Z)  # A field over the mixed function space Z
@@ -48,12 +48,12 @@ def rectangle_taylor_test(case):
     u.rename("Velocity")
     p.rename("Pressure")
 
-    Ra = Constant(1e6) # Rayleigh number
+    Ra = Constant(1e6)  # Rayleigh number
     approximation = BoussinesqApproximation(Ra)
 
     # Define time stepping parameters:
     max_timesteps = 80
-    delta_t = Constant(4e-6) # Constant time step
+    delta_t = Constant(4e-6)  # Constant time step
 
     # Without a restart to continue from, our initial guess is the final state of the forward run
     # We need to project the state from Q2 into Q1
@@ -62,24 +62,25 @@ def rectangle_taylor_test(case):
 
     checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
     # Initialise the control
-    Tic.project(checkpoint_file.load_function(
-        mesh,
-        "Temperature",
-        idx=max_timesteps-1)
+    Tic.project(
+        checkpoint_file.load_function(
+            mesh,
+            "Temperature",
+            idx=max_timesteps-1
         )
-    Taverage.project(checkpoint_file.load_function(
-        mesh,
-        "Average Temperature",
-        idx=0)
+    )
+    Taverage.project(
+        checkpoint_file.load_function(
+            mesh,
+            "Average Temperature",
+            idx=0
         )
+    )
 
     # Temperature function in Q2, where we solve the equations
     T = Function(Q, name="Temperature")
 
-
     Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
-
-
 
     stokes_bcs = {
         "top": {"uy": 0},
@@ -159,7 +160,6 @@ def rectangle_taylor_test(case):
 
     # Temperature misfit between solution and observation
     t_misfit = assemble((T - Tobs) ** 2 * dx)
-
 
     if case == "Tobs":
         objective = t_misfit
