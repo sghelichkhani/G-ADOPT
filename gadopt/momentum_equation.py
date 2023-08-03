@@ -188,6 +188,7 @@ class MomentumSourceTerm(BaseTerm):
 
 class PrestressAdvectionFreeSurfaceTerm(BaseTerm):
     def residual(self, test, trial, trial_lagged, fields, bcs):
+        
         surface_id = fields['surface_id']
         rhog = fields['rhog']
         n = self.n
@@ -227,8 +228,9 @@ class PreviousStressTerm(BaseTerm):
     """
     def residual(self, test, trial, trial_lagged, fields, bcs):
 
-        mu = fields['viscosity']
         previous_stress = fields['previous_stress']
+
+        mu = fields['viscosity']
         phi = test
         n = self.n
         u = trial_lagged # DOES THIS WORK OK ? 
@@ -289,7 +291,7 @@ class MomentumEquation(BaseEquation):
     Momentum equation with advection, viscosity, pressure gradient, source term, and coriolis.
     """
 
-    terms = [ViscosityTerm, PressureGradientTerm, MomentumSourceTerm,PrestressAdvectionFreeSurfaceTerm, PreviousStressTerm]
+    terms = [ViscosityTerm, PressureGradientTerm, MomentumSourceTerm]#,PrestressAdvectionFreeSurfaceTerm ]#, PreviousStressTerm]
 
 
 class ContinuityEquation(BaseEquation):

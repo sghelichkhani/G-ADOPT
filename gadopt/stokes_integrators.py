@@ -94,8 +94,8 @@ def create_stokes_nullspace(Z, closed=True, rotational=False, translations=None)
 class StokesSolver:
     name = 'Stokes'
 
-    def __init__(self, z, T, approximation, bcs=None, mu=1, previous_stress=1,
-                 quad_degree=6, cartesian=True, solver_parameters=None,
+    def __init__(self, z, T, approximation, bcs=None, mu=1, 
+                quad_degree=6, cartesian=True, solver_parameters=None,
                  closed=True, rotational=False, J=None, additional_fields={},
                  **kwargs):
         self.Z = z.function_space()
