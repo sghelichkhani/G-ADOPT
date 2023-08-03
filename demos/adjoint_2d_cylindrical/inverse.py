@@ -50,8 +50,8 @@ def inverse(alpha_u, alpha_d, alpha_s):
     rmin_earth = rmax_earth - 2900  # Radius of CMB [km]
     r_410_earth = rmax_earth - 410  # 410 radius [km]
     r_660_earth = rmax_earth - 660  # 660 raidus [km]
-    r_410 = rmax - (rmax_earth - r_410_earth)/(rmax_earth - rmin_earth)
-    r_660 = rmax - (rmax_earth - r_660_earth)/(rmax_earth - rmin_earth)
+    r_410 = rmax - (rmax_earth - r_410_earth) / (rmax_earth - rmin_earth)
+    r_660 = rmax - (rmax_earth - r_660_earth) / (rmax_earth - rmin_earth)
 
     with CheckpointFile("Checkpoint230.h5", "r") as f:
         mesh = f.load_mesh("firedrake_default_extruded")
@@ -70,7 +70,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
     u, p = split(z)  # Symbolic UFL expressions for u and p
 
     X = SpatialCoordinate(mesh)
-    r = sqrt(X[0]**2 + X[1]**2)
+    r = sqrt(X[0] ** 2 + X[1] ** 2)
     Ra = Constant(1e7)  # Rayleigh number
     approximation = BoussinesqApproximation(Ra)
 
@@ -86,19 +86,9 @@ def inverse(alpha_u, alpha_d, alpha_s):
     checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
     # Initialise the control
     Tic.project(
-        checkpoint_file.load_function(
-            mesh,
-            "Temperature",
-            idx=max_timesteps-1
-        )
+        checkpoint_file.load_function(mesh, "Temperature", idx=max_timesteps - 1)
     )
-    Taverage.project(
-        checkpoint_file.load_function(
-            mesh,
-            "Average Temperature",
-            idx=0
-        )
-    )
+    Taverage.project(checkpoint_file.load_function(mesh, "Average Temperature", idx=0))
 
     # Temperature function in Q2, where we solve the equations
     T = Function(Q, name="Temperature")
@@ -107,33 +97,40 @@ def inverse(alpha_u, alpha_d, alpha_s):
     # Build a step centred at "centre" with given magnitude
     # Increase with radius if "increasing" is True
     def step_func(centre, mag, increasing=True, sharpness=50):
-        return mag * (0.5 * (1 + tanh((1 if increasing else -1)*(r-centre)*sharpness)))
+        return mag * (
+            0.5 * (1 + tanh((1 if increasing else -1) * (r - centre) * sharpness))
+        )
 
     # From this point, we define a depth-dependent viscosity mu
     mu_lin = 2.0
 
     # Assemble the depth dependence
     for line, step in zip(
-            [5.*(rmax-r), 1., 1.],
-            [step_func(r_660, 30, False),
-             step_func(r_410, 10, False),
-             step_func(2.2, 10, True)]):
-        mu_lin += line*step
+        [5.0 * (rmax - r), 1.0, 1.0],
+        [
+            step_func(r_660, 30, False),
+            step_func(r_410, 10, False),
+            step_func(2.2, 10, True),
+        ],
+    ):
+        mu_lin += line * step
 
     # Add temperature dependence of viscosity
     mu_lin *= exp(-ln(Constant(80)) * T)
 
     # Assemble the viscosity expression in terms of velocity u
     eps = sym(grad(u))
-    epsii = sqrt(0.5*inner(eps, eps))
-    sigma_y = 1e4 + 2.0e5*(rmax-r)
+    epsii = sqrt(0.5 * inner(eps, eps))
+    sigma_y = 1e4 + 2.0e5 * (rmax - r)
     mu_plast = 0.1 + (sigma_y / epsii)
-    mu_eff = 2 * (mu_lin * mu_plast)/(mu_lin + mu_plast)
+    mu_eff = 2 * (mu_lin * mu_plast) / (mu_lin + mu_plast)
     mu = conditional(mu_eff > 0.4, mu_eff, 0.4)
 
     # Nullspaces and near-nullspaces:
     Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=True)
-    Z_near_nullspace = create_stokes_nullspace(Z, closed=False, rotational=True, translations=[0, 1])
+    Z_near_nullspace = create_stokes_nullspace(
+        Z, closed=False, rotational=True, translations=[0, 1]
+    )
 
     stokes_bcs = {
         "top": {"un": 0},
@@ -163,7 +160,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
         nullspace=Z_nullspace,
         transpose_nullspace=Z_nullspace,
         near_nullspace=Z_near_nullspace,
-        solver_parameters=newton_stokes_solver_parameters
+        solver_parameters=newton_stokes_solver_parameters,
     )
 
     # Control variable for optimisation
@@ -181,11 +178,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
         energy_solver.solve()
 
         # Update the accumulated surface velocity misfit using the observed value
-        uobs = checkpoint_file.load_function(
-            mesh,
-            name="Velocity",
-            idx=timestep
-        )
+        uobs = checkpoint_file.load_function(mesh, name="Velocity", idx=timestep)
         u_misfit += assemble(dot(u - uobs, u - uobs) * ds_t)
 
     # Load the observed final state
@@ -204,20 +197,20 @@ def inverse(alpha_u, alpha_d, alpha_s):
 
     # Define the component terms of the overall objective functional
     damping = assemble((Tic - Taverage) ** 2 * dx)
-    norm_damping = assemble(Taverage ** 2 * dx)
+    norm_damping = assemble(Taverage**2 * dx)
     smoothing = assemble(dot(grad(Tic - Taverage), grad(Tic - Taverage)) * dx)
     norm_smoothing = assemble(dot(grad(Tobs), grad(Tobs)) * dx)
-    norm_obs = assemble(Tobs ** 2 * dx)
+    norm_obs = assemble(Tobs**2 * dx)
     norm_u_surface = assemble(dot(uobs, uobs) * ds_t)
 
     # Temperature misfit between solution and observation
     t_misfit = assemble((T - Tobs) ** 2 * dx)
 
     objective = (
-        t_misfit +
-        alpha_u * (norm_obs * u_misfit / max_timesteps / norm_u_surface) +
-        alpha_d * (norm_obs * damping / norm_damping) +
-        alpha_s * (norm_obs * smoothing / norm_smoothing)
+        t_misfit
+        + alpha_u * (norm_obs * u_misfit / max_timesteps / norm_u_surface)
+        + alpha_d * (norm_obs * damping / norm_damping)
+        + alpha_s * (norm_obs * smoothing / norm_smoothing)
     )
 
     # All done with the forward run, stop annotating anything else to the tape
@@ -227,8 +220,12 @@ def inverse(alpha_u, alpha_d, alpha_s):
     reduced_functional = ReducedFunctional(objective, control)
 
     def callback():
-        initial_misfit = assemble((Tic.block_variable.checkpoint.restore() - Tic_ref) ** 2 * dx)
-        final_misfit = assemble((T.block_variable.checkpoint.restore() - Tobs) ** 2 * dx)
+        initial_misfit = assemble(
+            (Tic.block_variable.checkpoint.restore() - Tic_ref) ** 2 * dx
+        )
+        final_misfit = assemble(
+            (T.block_variable.checkpoint.restore() - Tobs) ** 2 * dx
+        )
 
         log(f"Initial misfit; {initial_misfit}; final misfit: {final_misfit}")
 
@@ -244,7 +241,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
     optimiser = LinMoreOptimiser(
         minimisation_problem,
         minimisation_parameters,
-        checkpoint_dir="optimisation_checkpoint"
+        checkpoint_dir="optimisation_checkpoint",
     )
     optimiser.add_callback(callback)
     optimiser.run()

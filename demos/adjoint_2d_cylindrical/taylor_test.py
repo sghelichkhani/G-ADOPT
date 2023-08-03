@@ -209,8 +209,7 @@ def annulus_taylor_test(case):
     smoothing = assemble(dot(grad(Tic - Taverage), grad(Tic - Taverage)) * dx)
     norm_smoothing = assemble(dot(grad(Tobs), grad(Tobs)) * dx)
     norm_obs = assemble(Tobs**2 * dx)
-    norm_u_surface = assemble(dot(uobs, uobs) * ds_t
-                              )
+    norm_u_surface = assemble(dot(uobs, uobs) * ds_t)
 
     # Temperature misfit between solution and observation
     t_misfit = assemble((T - Tobs) ** 2 * dx)

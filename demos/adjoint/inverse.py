@@ -57,16 +57,10 @@ def inverse(alpha_u, alpha_d, alpha_s):
 
     checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
     # Initialise the control
-    Tic.project(checkpoint_file.load_function(
-        mesh,
-        "Temperature",
-        idx=max_timesteps-1)
+    Tic.project(
+        checkpoint_file.load_function(mesh, "Temperature", idx=max_timesteps - 1)
     )
-    Taverage.project(checkpoint_file.load_function(
-        mesh,
-        "Average Temperature",
-        idx=0)
-    )
+    Taverage.project(checkpoint_file.load_function(mesh, "Average Temperature", idx=0))
 
     # Temperature function in Q2, where we solve the equations
     T = Function(Q, name="Temperature")
@@ -117,11 +111,7 @@ def inverse(alpha_u, alpha_d, alpha_s):
         energy_solver.solve()
 
         # Update the accumulated surface velocity misfit using the observed value
-        uobs = checkpoint_file.load_function(
-            mesh,
-            name="Velocity",
-            idx=timestep
-        )
+        uobs = checkpoint_file.load_function(mesh, name="Velocity", idx=timestep)
         u_misfit += assemble(dot(u - uobs, u - uobs) * ds_t)
 
     # Load the observed final state
@@ -140,20 +130,20 @@ def inverse(alpha_u, alpha_d, alpha_s):
 
     # Define the component terms of the overall objective functional
     damping = assemble((Tic - Taverage) ** 2 * dx)
-    norm_damping = assemble(Taverage ** 2 * dx)
+    norm_damping = assemble(Taverage**2 * dx)
     smoothing = assemble(dot(grad(Tic - Taverage), grad(Tic - Taverage)) * dx)
     norm_smoothing = assemble(dot(grad(Tobs), grad(Tobs)) * dx)
-    norm_obs = assemble(Tobs ** 2 * dx)
+    norm_obs = assemble(Tobs**2 * dx)
     norm_u_surface = assemble(dot(uobs, uobs) * ds_t)
 
     # Temperature misfit between solution and observation
     t_misfit = assemble((T - Tobs) ** 2 * dx)
 
     objective = (
-        t_misfit +
-        alpha_u * (norm_obs * u_misfit / max_timesteps / norm_u_surface) +
-        alpha_d * (norm_obs * damping / norm_damping) +
-        alpha_s * (norm_obs * smoothing / norm_smoothing)
+        t_misfit
+        + alpha_u * (norm_obs * u_misfit / max_timesteps / norm_u_surface)
+        + alpha_d * (norm_obs * damping / norm_damping)
+        + alpha_s * (norm_obs * smoothing / norm_smoothing)
     )
 
     # All done with the forward run, stop annotating anything else to the tape
@@ -163,8 +153,12 @@ def inverse(alpha_u, alpha_d, alpha_s):
     reduced_functional = ReducedFunctional(objective, control)
 
     def callback():
-        initial_misfit = assemble((Tic.block_variable.checkpoint - Tic_ref) ** 2 * dx)
-        final_misfit = assemble((T.block_variable.checkpoint - Tobs) ** 2 * dx)
+        initial_misfit = assemble(
+            (Tic.block_variable.checkpoint.restore() - Tic_ref) ** 2 * dx
+        )
+        final_misfit = assemble(
+            (T.block_variable.checkpoint.restore() - Tobs) ** 2 * dx
+        )
 
         log(f"Initial misfit; {initial_misfit}; final misfit: {final_misfit}")
 
