@@ -47,7 +47,7 @@ print("tau0", tau0.values()[0])
 time = Constant(0.0)
 dt = Constant(tau0/80)  # Initial time-step
 #max_timesteps = round(50*maxwell_time/dt)
-max_timesteps = round(10*tau0/dt)
+max_timesteps = round(20*tau0/dt)
 print("max timesteps", max_timesteps)
 #dump_period = round(1*maxwell_time/dt)
 #dump_period = round(1*tau0/dt)
@@ -84,7 +84,7 @@ Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
 u_.rename("Incremental Displacement")
 p_.rename("Pressure")
 # Create output file and select output_frequency:
-output_file = File("/data/free_surface/2d_box/viscoelastic/output_viscoelastic_dt0.125tau_noboundary_prefprevstress.pvd")
+output_file = File("/data/free_surface/2d_box/viscoelastic/output_viscoelastic_dt0.125tau_noboundary_prefprevstress_20tau.pvd")
 
 
 stokes_bcs = {
