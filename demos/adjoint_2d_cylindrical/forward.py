@@ -80,8 +80,8 @@ def run_forward():
     mu_lin *= exp(-ln(Constant(80)) * T)
 
     # Assemble the viscosity expression in terms of velocity u
-    eps = sym(grad(u))
-    epsii = sqrt(0.5 * inner(eps, eps))
+    eps = 0.5 * sym(grad(u))
+    epsii = sqrt(inner(eps, eps))
     sigma_y = 1e4 + 2.0e5 * (rmax - r)
     mu_plast = 0.1 + (sigma_y / epsii)
     mu_eff = 2 * (mu_lin * mu_plast) / (mu_lin + mu_plast)
