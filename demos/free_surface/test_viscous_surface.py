@@ -8,9 +8,10 @@ output_directory="."
 def viscous_freesurface_model(nx, dt_factor):
 
     # Set up geometry:
+    D = 3e6 # length of domain in m
+    lam = D/8 # wavelength of load in m
+    L = lam # Depth of the domain in m
     ny = nx
-    L = 3e6 # length of domain in m
-    D = L # Depth of the domain in m
     mesh = RectangleMesh(nx, ny, L, D)  # Rectangle mesh generated via firedrake
     left_id, right_id, bottom_id, top_id = 1, 2, 3, 4  # Boundary IDs
 
@@ -25,7 +26,7 @@ def viscous_freesurface_model(nx, dt_factor):
     u, p = split(z)  # Returns symbolic UFL expression for u and p
 
 
-    eta = Function(W)
+    eta = Function(W, name="eta")
 
     T = Function(Q, name="Temperature").assign(0)
     # Output function space information:
@@ -42,7 +43,7 @@ def viscous_freesurface_model(nx, dt_factor):
 
     # Nullspaces and near-nullspaces:
     Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
-    #eta_nullspace=VectorSpaceBasis(constant=True)
+    eta_nullspace=VectorSpaceBasis(constant=True)
 
     # Write output files in VTK format:
     u_, p_ = z.subfunctions #subfunctions  # Do this first to extract individual velocity and pressure fields.
@@ -56,7 +57,6 @@ def viscous_freesurface_model(nx, dt_factor):
     g = 10 # gravitational acceleration in m/s^2
     approximation = BoussinesqApproximation(Ra,g=g,rho=rho0)
 
-    lam = D/4 # wavelength of load in m
     kk = 2 * pi / lam # wavenumber in m^-1
     F0 = 1000 # initial free surface amplitude in m
     X = SpatialCoordinate(mesh)
@@ -68,6 +68,7 @@ def viscous_freesurface_model(nx, dt_factor):
     tau0 = 2 * kk * mu / (rho0 * g) 
     print("tau0", tau0)
     dt = dt_factor*tau0  # Initial time-step
+    #dump_period = round(tau0/dt)
     dump_period = round(tau0/dt)
     print(dump_period)
     time = 0.0
@@ -75,7 +76,7 @@ def viscous_freesurface_model(nx, dt_factor):
     print("max_timesteps", max_timesteps)
     # Create output file and select output_frequency:
     filename=os.path.join(output_directory, "viscous_freesurface")
-    output_file = File(filename+"_D"+str(D)+"_mu"+str(mu)+"_nx"+str(nx)+".pvd")
+    output_file = File(filename+"_D"+str(D)+"_mu"+str(mu)+"_nx"+str(nx)+"_dt"+str(dt)+".pvd")
     
 
     stokes_bcs = {
@@ -110,13 +111,13 @@ def viscous_freesurface_model(nx, dt_factor):
         'mat_mumps_icntl_14': 200 
      #   'ksp_monitor': None,
     }
-    stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs, mu=mu, cartesian=True)
+    stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs, mu=mu, cartesian=True, solver_parameters=mumps_solver_parameters)
 
 
     eta_timestepper = BackwardEuler(eta_eq, eta, eta_fields, dt, eta_bcs, strong_bcs=eta_strong_bcs,solver_parameters=mumps_solver_parameters) 
 
     # analytical function
-    eta_analytical = Function(W)
+    eta_analytical = Function(W, name="eta analytical")
     eta_analytical.interpolate(exp(-time/tau0)*F0 * cos(kk * X[0]))
     
     if OUTPUT:
@@ -147,20 +148,20 @@ def viscous_freesurface_model(nx, dt_factor):
                 output_file.write(u_, eta, p_, eta_analytical)
     
     final_error = pow(error,0.5)/L
-    return final_error, error_tau 
+    return final_error #, error_tau 
 
 
 cells = [5,10,20,40]
-dt_factors = [0.5, 0.25, 0.125, 0.0625]
+dt_factors = [1,0.5,0.25, 0.125, 0.0625, 0.03125]
 errors = np.array([viscous_freesurface_model(80, dtf) for dtf in dt_factors]) 
 conv = np.log(errors[:-1]/errors[1:])/np.log(2)
 
-print('time surface displacement errors: ', errors[:, 0])
-print('time surface displacement conv: ', conv[:, 0])
+print('time surface displacement errors: ', errors[:])
+print('time surface displacement conv: ', conv[:])
 
-errors = np.array([viscous_freesurface_model(c, 0.0078125) for c in cells]) # I think the timestep needs to be really small to make sure this error does not dominate for finer meshes
-conv = np.log(errors[:-1]/errors[1:])/np.log(2)
-print('spatial surface displacement errors at t=tau: ', errors[:, 1])
-print('spatial surface displacement conv at t=tau: ', conv[:, 1])
+#errors = np.array([viscous_freesurface_model(c, 0.0078125) for c in cells]) # I think the timestep needs to be really small to make sure this error does not dominate for finer meshes
+#conv = np.log(errors[:-1]/errors[1:])/np.log(2)
+#print('spatial surface displacement errors at t=tau: ', errors[:, 1])
+#print('spatial surface displacement conv at t=tau: ', conv[:, 1])
 
 
