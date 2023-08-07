@@ -46,7 +46,7 @@ Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
 Z_near_nullspace = create_stokes_nullspace(Z, closed=False, rotational=True, translations=[0, 1, 2])
 
 # Write output files in VTK format:
-u, p = z.split()  # Do this first to extract individual velocity and pressure fields.
+u, p = z.subfunctions  # Do this first to extract individual velocity and pressure fields.
 # Next rename for output:
 u.rename("Velocity")
 p.rename("Pressure")
@@ -81,6 +81,10 @@ stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs,
                              cartesian=True,
                              nullspace=Z_nullspace, transpose_nullspace=Z_nullspace,
                              near_nullspace=Z_near_nullspace)
+
+# Change solver tolerances for CI - note not done for models shown in paper.
+stokes_solver.solver_parameters['fieldsplit_0']['ksp_rtol'] = 1e-4
+stokes_solver.solver_parameters['fieldsplit_1']['ksp_rtol'] = 1e-3
 
 # Now perform the time loop:
 for timestep in range(0, max_timesteps):
