@@ -59,7 +59,7 @@ def elastic_model(nx):
     rho0 = 4500 # density in kg/m^3
     g = 10 # gravitational acceleration in m/s^2
 
-    lam = D/2 # wavelength of load in m # better convergence (~2.9) than D or D/4
+    lam = D/8 # wavelength of load in m # better convergence (~2.9) than D or D/4
     k = 2 * pi / lam # wavenumber in m^-1
     F0 = 1000 # initial free surface amplitude in m
     X = SpatialCoordinate(mesh)
@@ -101,10 +101,11 @@ def elastic_model(nx):
 
 
 
-cells = [5,10,20,40,80]
+cells = [20,40,80,160]
 
 errors = np.array([elastic_model(c) for c in cells]) 
 conv = np.log(errors[:-1]/errors[1:])/np.log(2)
 
 print('surface displacement errors: ', errors[:])
 print('surface displacement conv: ', conv[:])
+assert all(conv[:]> 2.8)

@@ -186,20 +186,19 @@ class MomentumSourceTerm(BaseTerm):
 
         return F
 
+
 class PrestressAdvectionFreeSurfaceTerm(BaseTerm):
     def residual(self, test, trial, trial_lagged, fields, bcs):
-        
         surface_id = fields['surface_id']
         rhog = fields['rhog']
         n = self.n
         phi = test
         u = trial
-        un = dot(u,n)*n
-        F = dot(phi,rhog * un )*self.ds(surface_id)
-
-#                F += dot(-phi, bc['stress']) * self.ds(id)
+        un = dot(u, n) * n
+        F = dot(phi, rhog * un)*self.ds(surface_id)
 
         return -F
+
 
 class PreviousStressTerm(BaseTerm):
 
@@ -229,59 +228,14 @@ class PreviousStressTerm(BaseTerm):
     def residual(self, test, trial, trial_lagged, fields, bcs):
 
         previous_stress = fields['previous_stress']
-
-        mu = fields['viscosity']
         phi = test
-        n = self.n
-        u = trial_lagged # DOES THIS WORK OK ? 
-        u_lagged = trial_lagged
-        compressible = self.term_kwargs['compressible']
-
         grad_test = nabla_grad(phi)
-        if compressible:
-            stress -= 2/3 * mu * Identity(self.dim) * div(u)
+
+#        compressible = self.term_kwargs['compressible']
+#        if compressible:
+#            previous_stress -= 2/3 * mu * Identity(self.dim) * div(u)
 
         F = inner(grad_test, previous_stress)*self.dx
-        
- #       for id, bc in bcs.items():
- #           if 'u' in bc or 'un' in bc:
- #               if 'u' in bc:
- #                   u_tensor_jump = outer(n, u-bc['u'])
- #                   if compressible:
- #                       u_tensor_jump -= 2/3 * Identity(self.dim) * (dot(n, u) - dot(n, bc['u']))
- #               else:
- #                   u_tensor_jump = outer(n, n)*(dot(n, u)-bc['un'])
- #                   if compressible:
- #                       u_tensor_jump -= 2/3 * Identity(self.dim) * (dot(n, u) - bc['un'])
- #               u_tensor_jump += transpose(u_tensor_jump)
- #               # this corresponds to the same 3 terms as the dS integrals for DG above:
- #       #        F += 2*sigma*inner(outer(n, phi), mu * u_tensor_jump)*self.ds(id)
- #       #        F += -inner(mu * nabla_grad(phi), u_tensor_jump)*self.ds(id)
- #               if 'u' in bc:
- #                   F += -inner(outer(n, phi), previous_stress) * self.ds(id)
- #               elif 'un' in bc:
- #                   # we only keep, the normal part of stress, the tangential
- #                   # part is assumed to be zero stress (i.e. free slip), or prescribed via 'stress'
- #                   F += -dot(n, phi)*dot(n, dot(previous_stress, n)) * self.ds(id)
- #           if 'old_stress' in bc:  # a momentum flux, a.k.a. "force"
- #               # here we need only the third term, because we assume jump_u=0 (u_ext=u)
- #               # the provided stress = n.(mu.stress_tensor)
- #               F += dot(-phi, bc['old_stress']) * self.ds(id)
- #           if 'drag' in bc:  # (bottom) drag of the form tau = -C_D u |u|
- #               C_D = bc['drag']
- #               unorm = pow(dot(u_lagged, u_lagged) + 1e-6, 0.5)
-#
-#                F += dot(-phi, -C_D*unorm*u) * self.ds(id)
-#
-#            # NOTE 1: unspecified boundaries are equivalent to free stress (i.e. free in all directions)
-#            # NOTE 2: 'un' can be combined with 'stress' provided the stress force is tangential (e.g. no-normal flow with wind)
-#
-#            if 'u' in bc and 'stress' in bc:
-#                raise ValueError("Cannot apply both 'u' and 'stress' bc on same boundary")
-#            if 'u' in bc and 'drag' in bc:
-#                raise ValueError("Cannot apply both 'u' and 'drag' bc on same boundary")
-#            if 'u' in bc and 'un' in bc:
-#                raise ValueError("Cannot apply both 'u' and 'un' bc on same boundary")
 
         return -F
 
@@ -291,7 +245,23 @@ class MomentumEquation(BaseEquation):
     Momentum equation with advection, viscosity, pressure gradient, source term, and coriolis.
     """
 
-    terms = [ViscosityTerm, PressureGradientTerm, MomentumSourceTerm]#,PrestressAdvectionFreeSurfaceTerm ]#, PreviousStressTerm]
+    terms = [ViscosityTerm, PressureGradientTerm, MomentumSourceTerm]
+
+
+class ElasticPrestressEquation(BaseEquation):
+    """
+    Momentum equation with advection, viscosity, pressure gradient, source term, and coriolis.
+    """
+
+    terms = [ViscosityTerm, PressureGradientTerm, MomentumSourceTerm, PrestressAdvectionFreeSurfaceTerm]
+
+
+class ViscoElasticEquation(BaseEquation):
+    """
+    Momentum equation with advection, viscosity, pressure gradient, source term, and coriolis.
+    """
+
+    terms = [ViscosityTerm, PressureGradientTerm, MomentumSourceTerm, PrestressAdvectionFreeSurfaceTerm, PreviousStressTerm]
 
 
 class ContinuityEquation(BaseEquation):
@@ -304,5 +274,17 @@ class ContinuityEquation(BaseEquation):
 
 def StokesEquations(test_space, trial_space, quad_degree=None, **kwargs):
     mom_eq = MomentumEquation(test_space.sub(0), trial_space.sub(0), quad_degree=quad_degree, **kwargs)
+    cty_eq = ContinuityEquation(test_space.sub(1), trial_space.sub(1), quad_degree=quad_degree, **kwargs)
+    return [mom_eq, cty_eq]
+
+
+def ElasticPrestressEquations(test_space, trial_space, quad_degree=None, **kwargs):
+    mom_eq = ElasticPrestressEquation(test_space.sub(0), trial_space.sub(0), quad_degree=quad_degree, **kwargs)
+    cty_eq = ContinuityEquation(test_space.sub(1), trial_space.sub(1), quad_degree=quad_degree, **kwargs)
+    return [mom_eq, cty_eq]
+
+
+def ViscoElasticEquations(test_space, trial_space, quad_degree=None, **kwargs):
+    mom_eq = ViscoElasticEquation(test_space.sub(0), trial_space.sub(0), quad_degree=quad_degree, **kwargs)
     cty_eq = ContinuityEquation(test_space.sub(1), trial_space.sub(1), quad_degree=quad_degree, **kwargs)
     return [mom_eq, cty_eq]
