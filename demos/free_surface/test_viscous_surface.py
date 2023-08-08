@@ -2,7 +2,7 @@ from gadopt import *
 from mpi4py import MPI
 import os
 import numpy as np
-OUTPUT=True
+OUTPUT=False
 output_directory="."
 
 def viscous_freesurface_model(nx, dt_factor):
@@ -37,7 +37,7 @@ def viscous_freesurface_model(nx, dt_factor):
 
 
 
-    eta_eq = FreeSurfaceEquation(W, W, surface=True)
+    eta_eq = FreeSurfaceEquation(W, W, surface_id=top_id)
 
     steady_state_tolerance = 1e-9
 
@@ -68,7 +68,6 @@ def viscous_freesurface_model(nx, dt_factor):
     tau0 = 2 * kk * mu / (rho0 * g) 
     print("tau0", tau0)
     dt = dt_factor*tau0  # Initial time-step
-    #dump_period = round(tau0/dt)
     dump_period = round(tau0/dt)
     print(dump_period)
     time = 0.0
@@ -76,7 +75,7 @@ def viscous_freesurface_model(nx, dt_factor):
     print("max_timesteps", max_timesteps)
     # Create output file and select output_frequency:
     filename=os.path.join(output_directory, "viscous_freesurface")
-    output_file = File(filename+"_D"+str(D)+"_mu"+str(mu)+"_nx"+str(nx)+"_dt"+str(dt)+".pvd")
+    output_file = File(filename+"_D"+str(D)+"_mu"+str(mu)+"_nx"+str(nx)+"_dt"+str(dt/tau0)+"tau.pvd")
     
 
     stokes_bcs = {
@@ -86,15 +85,10 @@ def viscous_freesurface_model(nx, dt_factor):
         right_id: {'un': 0},
     }
 
-    eta_fields = {'velocity': u_}
+    eta_fields = {'velocity': u_,
+                    'surface_id': top_id}
 
-    class InteriorBC(DirichletBC):
-        """DirichletBC applied to anywhere that is *not* on the specified boundary"""
-        @utils.cached_property
-        def nodes(self):
-            return np.array(list(set(range(self._function_space.node_count)) - set(super().nodes)))
-
-    eta_bcs = {}
+    eta_bcs = {} 
 
     eta_strong_bcs = [InteriorBC(W, 0., top_id)]
 
@@ -114,8 +108,8 @@ def viscous_freesurface_model(nx, dt_factor):
     stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs, mu=mu, cartesian=True, solver_parameters=mumps_solver_parameters)
 
 
-    eta_timestepper = BackwardEuler(eta_eq, eta, eta_fields, dt, eta_bcs, strong_bcs=eta_strong_bcs,solver_parameters=mumps_solver_parameters) 
-
+    eta_timestepper = BackwardEuler(eta_eq, eta, eta_fields, dt, bnd_conditions=eta_bcs, strong_bcs=eta_strong_bcs,solver_parameters=mumps_solver_parameters) 
+ # bnd_conditons is different to thwaites (it is just passed in order...)
     # analytical function
     eta_analytical = Function(W, name="eta analytical")
     eta_analytical.interpolate(exp(-time/tau0)*F0 * cos(kk * X[0]))
@@ -148,20 +142,24 @@ def viscous_freesurface_model(nx, dt_factor):
                 output_file.write(u_, eta, p_, eta_analytical)
     
     final_error = pow(error,0.5)/L
-    return final_error #, error_tau 
+    return final_error, error_tau 
 
 
-cells = [5,10,20,40]
-dt_factors = [1,0.5,0.25, 0.125, 0.0625, 0.03125]
+dt_factors = [1,0.5,0.25]#, 0.125, 0.0625, 0.03125]
 errors = np.array([viscous_freesurface_model(80, dtf) for dtf in dt_factors]) 
 conv = np.log(errors[:-1]/errors[1:])/np.log(2)
 
-print('time surface displacement errors: ', errors[:])
-print('time surface displacement conv: ', conv[:])
+print('time surface displacement errors: ', errors[:,0])
+print('time surface displacement conv: ', conv[:, 0])
 
-#errors = np.array([viscous_freesurface_model(c, 0.0078125) for c in cells]) # I think the timestep needs to be really small to make sure this error does not dominate for finer meshes
+assert all(conv[:,0]> 0.95)
+
+cells = [5,10,20,40]
+dt_factors_spatial = [1/128, 1/256, 1/512, 1/1024]  # use smaller timesteps for spatial test to make sure spatial error dominates
+#errors = np.array([viscous_freesurface_model(c, dtf) for (c,dtf) in zip(cells, dt_factors_spatial)]) # I think the timestep needs to be really small to make sure this error does not dominate for finer meshes
 #conv = np.log(errors[:-1]/errors[1:])/np.log(2)
 #print('spatial surface displacement errors at t=tau: ', errors[:, 1])
 #print('spatial surface displacement conv at t=tau: ', conv[:, 1])
 
 
+#assert all(conv[:,1]> polynomial_order+0.85)

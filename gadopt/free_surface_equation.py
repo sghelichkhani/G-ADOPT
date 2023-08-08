@@ -1,8 +1,5 @@
 from .equations import BaseTerm, BaseEquation
-from firedrake import dot, inner, div, grad, avg, jump, sign
-from firedrake import min_value, Identity, assemble
-from firedrake import FacetArea, CellVolume
-from .utility import is_continuous, normal_is_continuous, cell_edge_integral_ratio
+from firedrake import dot
 r"""
 This module contains the scalar terms and equations (e.g. for temperature and salinity transport)
 
@@ -25,22 +22,16 @@ class FreeSurfaceTerm(BaseTerm):
     """
     def residual(self, test, trial, trial_lagged, fields, bcs):
         u = fields['velocity']
+        assert 'surface_id' in fields
+        surface_id = fields['surface_id']
         psi = test
         n = self.n
-        continuous_u_normal = normal_is_continuous(u)
-        if 'advective_velocity_scaling' in fields:
-            u = fields['advective_velocity_scaling'] * u
 
         print("eta u.. inside: ", u.dat.data[:])
-        F = psi * dot(u,n) * self.ds(4)  # Note this term is already on the RHS
-        print("hello free surface")
-        print("assemble RHS...: ", assemble(F))
-        print("type assemble RHS...: ", type(assemble(F)))
-        print("assemble RHS...: ", assemble(F).dat.data[:])
+
+        F = psi * dot(u, n) * self.ds(surface_id)  # Note this term is already on the RHS
 
         return F
-
-
 
 
 class FreeSurfaceEquation(BaseEquation):
@@ -49,4 +40,3 @@ class FreeSurfaceEquation(BaseEquation):
     """
 
     terms = [FreeSurfaceTerm]
-

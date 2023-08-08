@@ -3,7 +3,7 @@ A module with utitity functions for gadopt
 """
 from firedrake import outer, ds_v, ds_t, ds_b, CellDiameter, CellVolume, dot, JacobianInverse
 from firedrake import sqrt, Function, FiniteElement, TensorProductElement, FunctionSpace, VectorFunctionSpace
-from firedrake import as_vector, SpatialCoordinate, Constant
+from firedrake import as_vector, SpatialCoordinate, Constant, DirichletBC, utils
 import ufl
 from ufl.corealg.traversal import traverse_unique_terminals
 from firedrake.petsc import PETSc
@@ -12,7 +12,6 @@ import numpy as np
 import logging
 from logging import DEBUG, INFO, WARNING, ERROR, CRITICAL  # NOQA
 import os
-
 
 # TBD: do we want our own set_log_level and use logging module with handlers?
 log_level = logging.getLevelName(os.environ.get("GADOPT_LOGLEVEL", "INFO").upper())
@@ -306,3 +305,10 @@ def get_functionspace(mesh, h_family, h_degree, v_family=None, v_degree=None,
 
     constructor = VectorFunctionSpace if vector else FunctionSpace
     return constructor(mesh, elt, **kwargs)
+
+
+class InteriorBC(DirichletBC):
+    """DirichletBC applied to anywhere that is *not* on the specified boundary"""
+    @utils.cached_property
+    def nodes(self):
+        return np.array(list(set(range(self._function_space.node_count)) - set(super().nodes)))
