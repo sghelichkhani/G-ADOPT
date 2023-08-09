@@ -3,7 +3,7 @@ from mpi4py import MPI
 
 # Set up geometry:
 a, b, c = 1.0079, 0.6283, 1.0
-nx, ny, nz = 20, int(b/c * 20), 20
+nx, ny, nz = 10, int(b/c * 10), 10
 mesh2d = RectangleMesh(nx, ny, a, b, quadrilateral=True)  # Rectangular 2D mesh
 mesh = ExtrudedMesh(mesh2d, nz)
 bottom_id, top_id, left_id, right_id, front_id, back_id = "bottom", "top", 1, 2, 3, 4
