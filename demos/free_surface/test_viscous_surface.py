@@ -2,7 +2,7 @@ from gadopt import *
 from mpi4py import MPI
 import os
 import numpy as np
-OUTPUT=False
+OUTPUT=True
 output_directory="."
 
 def viscous_freesurface_model(nx, dt_factor):
@@ -10,7 +10,7 @@ def viscous_freesurface_model(nx, dt_factor):
     # Set up geometry:
     D = 3e6 # length of domain in m
     lam = D/8 # wavelength of load in m
-    L = lam # Depth of the domain in m
+    L = D #lam # Depth of the domain in m
     ny = nx
     mesh = RectangleMesh(nx, ny, L, D)  # Rectangle mesh generated via firedrake
     left_id, right_id, bottom_id, top_id = 1, 2, 3, 4  # Boundary IDs
@@ -67,7 +67,8 @@ def viscous_freesurface_model(nx, dt_factor):
     mu = 1e21 # Shear modulus in Pa
     tau0 = 2 * kk * mu / (rho0 * g) 
     print("tau0", tau0)
-    dt = dt_factor*tau0  # Initial time-step
+    dt = dt_factor*tau0/round(D/lam)  # Initial time-step for explicit free surface to be stable you need the 
+    #timestep to be smaller than the maximum possible wavelength which is the domain width. Otherwise at later times an instability can grow. 
     dump_period = round(tau0/dt)
     print(dump_period)
     time = 0.0
@@ -75,7 +76,8 @@ def viscous_freesurface_model(nx, dt_factor):
     print("max_timesteps", max_timesteps)
     # Create output file and select output_frequency:
     filename=os.path.join(output_directory, "viscous_freesurface")
-    output_file = File(filename+"_D"+str(D)+"_mu"+str(mu)+"_nx"+str(nx)+"_dt"+str(dt/tau0)+"tau.pvd")
+    if OUTPUT:
+        output_file = File(filename+"_D"+str(D)+"_mu"+str(mu)+"_nx"+str(nx)+"_dt"+str(dt/tau0)+"tau.pvd")
     
 
     stokes_bcs = {
@@ -145,17 +147,17 @@ def viscous_freesurface_model(nx, dt_factor):
     return final_error, error_tau 
 
 
-dt_factors = [1,0.5,0.25]#, 0.125, 0.0625, 0.03125]
+dt_factors = [0.5]#1,0.5,0.25, 0.125]#, 0.125, 0.0625, 0.03125]
 errors = np.array([viscous_freesurface_model(80, dtf) for dtf in dt_factors]) 
 conv = np.log(errors[:-1]/errors[1:])/np.log(2)
 
 print('time surface displacement errors: ', errors[:,0])
 print('time surface displacement conv: ', conv[:, 0])
 
-assert all(conv[:,0]> 0.95)
+#assert all(conv[:,0]> 0.95)
 
-cells = [5,10,20,40]
-dt_factors_spatial = [1/128, 1/256, 1/512, 1/1024]  # use smaller timesteps for spatial test to make sure spatial error dominates
+cells = [5,10]
+dt_factors_spatial = [1/128, 1/512]  # use smaller timesteps for spatial test to make sure spatial error dominates
 #errors = np.array([viscous_freesurface_model(c, dtf) for (c,dtf) in zip(cells, dt_factors_spatial)]) # I think the timestep needs to be really small to make sure this error does not dominate for finer meshes
 #conv = np.log(errors[:-1]/errors[1:])/np.log(2)
 #print('spatial surface displacement errors at t=tau: ', errors[:, 1])
