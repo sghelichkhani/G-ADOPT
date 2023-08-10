@@ -236,6 +236,7 @@ class PreviousStressTerm(BaseTerm):
 #            previous_stress -= 2/3 * mu * Identity(self.dim) * div(u)
 
         F = inner(grad_test, previous_stress)*self.dx
+#        F = -dot(phi, div(previous_stress))*self.dx
 
         return -F
 

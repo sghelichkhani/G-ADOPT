@@ -2,7 +2,7 @@ from gadopt import *
 from mpi4py import MPI
 
 # Set up geometry:
-nx, ny = 40, 40
+nx, ny = 160, 160
 L = 3e6 # length of domain in m
 D = L # Depth of the domain in m
 mesh = RectangleMesh(nx, ny, L, D)  # Rectangle mesh generated via firedrake
@@ -30,7 +30,7 @@ log("Number of Temperature DOF:", Q.dim())
 Ra = Constant(0)  # Rayleigh number
 approximation = BoussinesqApproximation(Ra)
 
-mu = 1e10 # Shear modulus in Pa
+mu = 1e11 # Shear modulus in Pa
 
 steady_state_tolerance = 1e-9
 
@@ -43,12 +43,12 @@ u, p = z.split() #subfunctions  # Do this first to extract individual velocity a
 u.rename("Displacement")
 p.rename("Pressure")
 # Create output file and select output_frequency:
-output_file = File("output_elastic_D_mu1e10_nonull.pvd")
+output_file = File("output_elastic_0.5D_mu1e11_nonull_prestressadv.pvd")
 
 rho0 = 4500 # density in kg/m^3
 g = 10 # gravitational acceleration in m/s^2
 
-lam = D # wavelength of load in m
+lam = D/2 # wavelength of load in m
 k = 2 * pi / lam # wavenumber in m^-1
 F0 = 1000 # initial free surface amplitude in m
 X = SpatialCoordinate(mesh)
@@ -61,9 +61,13 @@ stokes_bcs = {
     left_id: {'un': 0},
     right_id: {'un': 0},
 }
+stokes_fields = {
+        'surface_id': 4, # surface id for prestress advection
+        'rhog': 0 # rho*g for prestress advection
+         }
 
 stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs, mu=mu,
-                             cartesian=True)
+                             cartesian=True, equations=ElasticPrestressEquations, additional_fields=stokes_fields)
   #                           nullspace=Z_nullspace, transpose_nullspace=Z_nullspace)
 
 
