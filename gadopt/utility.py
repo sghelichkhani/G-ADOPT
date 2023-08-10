@@ -6,6 +6,7 @@ from firedrake import sqrt, Function, FiniteElement, TensorProductElement, Funct
 from firedrake import as_vector, SpatialCoordinate, Constant, max_value, min_value, dx, assemble, exp
 from firedrake import as_vector, SpatialCoordinate, Constant, max_value, min_value, dx, assemble
 import ufl
+import time
 from ufl.corealg.traversal import traverse_unique_terminals
 from firedrake.petsc import PETSc
 from mpi4py import MPI
@@ -14,8 +15,6 @@ import logging
 from logging import DEBUG, INFO, WARNING, ERROR, CRITICAL  # NOQA
 import os
 from scipy.linalg import solveh_banded
-from scipy.linalg import solveh_banded
-
 
 # TBD: do we want our own set_log_level and use logging module with handlers?
 log_level = logging.getLevelName(os.environ.get("GADOPT_LOGLEVEL", "INFO").upper())
@@ -433,3 +432,14 @@ class LayerAveraging:
         phi = max_value(min_value(1, (r - rp) / (rn - rp)), 0)
         val.assign(avg[-1])
         u.interpolate(u + val * phi)
+
+
+def timer_decorator(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Time taken for {func.__name__}: {elapsed_time} seconds")
+        return result
+    return wrapper
