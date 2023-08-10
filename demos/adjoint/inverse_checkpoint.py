@@ -149,8 +149,13 @@ def inverse(alpha_u, alpha_d, alpha_s):
     # All done with the forward run, stop annotating anything else to the tape
     pause_annotation()
 
+    # timer decorator for fwd and derivative calls.
+    ReducedFunctional.__call__ = timer_decorator(ReducedFunctional.__call__)
+    ReducedFunctional.derivative = timer_decorator(ReducedFunctional.derivative)
+
     # Defining the object for pyadjoint
     reduced_functional = ReducedFunctional(objective, control)
+
 
     def callback():
         initial_misfit = assemble(
