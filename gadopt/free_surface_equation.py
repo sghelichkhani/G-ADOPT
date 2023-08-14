@@ -27,7 +27,7 @@ class FreeSurfaceTerm(BaseTerm):
         psi = test
         n = self.n
 
-        print("eta u.. inside: ", u.dat.data[:])
+#        print("eta u.. inside: ", u.dat.data[:])
 
         F = psi * dot(u, n) * self.ds(surface_id)  # Note this term is already on the RHS
 

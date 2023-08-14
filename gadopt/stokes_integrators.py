@@ -1,5 +1,5 @@
-from .momentum_equation import StokesEquations
-from .utility import upward_normal, ensure_constant
+from .momentum_equation import StokesEquations, FreeSurfaceStokesEquations
+from .utility import upward_normal, ensure_constant, InteriorBC
 from .utility import log_level, INFO, DEBUG, depends_on
 import firedrake as fd
 
@@ -101,7 +101,14 @@ class StokesSolver:
         self.Z = z.function_space()
         self.mesh = self.Z.mesh()
         self.test = fd.TestFunctions(self.Z)
-        self.equations = equations(self.Z, self.Z, quad_degree=quad_degree,
+        
+        if equations==FreeSurfaceStokesEquations:
+            surface_id = additional_fields['surface_id']
+            self.dt = additional_fields['dt']
+            self.equations = equations(self.Z, self.Z, surface_id, quad_degree=quad_degree,
+                                   compressible=approximation.compressible)
+        else:
+            self.equations = equations(self.Z, self.Z, quad_degree=quad_degree,
                                    compressible=approximation.compressible)
         self.solution = z
         self.approximation = approximation
@@ -111,7 +118,16 @@ class StokesSolver:
         self.linear = not depends_on(self.mu, self.solution)
 
         self.solver_kwargs = kwargs
-        u, p = fd.split(self.solution)
+        if equations==FreeSurfaceStokesEquations:
+            print("implicit free surface stokes")
+            u, p, eta = fd.split(self.solution)
+            self.solution_old = fd.Function(self.solution)
+            u_old, p_old, eta_old = fd.split(self.solution_old)
+            theta = 0.5
+            eta_theta = (1-theta)*eta_old + theta*eta
+        else:
+            u, p = fd.split(self.solution)
+        
         self.k = upward_normal(self.Z.mesh(), cartesian)
 
         self.fields = {
@@ -120,7 +136,9 @@ class StokesSolver:
             'viscosity': self.mu,
             'interior_penalty': fd.Constant(6.25),  # matches C_ip=100. in "old" code for Q2Q1 in 2d
             'source': self.approximation.buoyancy(p, T) * self.k,
-            'rho_continuity': self.approximation.rho_continuity()}
+            'rho_continuity': self.approximation.rho_continuity(),
+            'eta': eta_theta  # free surface variable
+            }
 
         for key, value in additional_fields.items():
             self.fields[key] = value
@@ -138,6 +156,9 @@ class StokesSolver:
                     self.strong_bcs.append(fd.DirichletBC(self.Z.sub(0).sub(1), value, id))
                 elif type == 'uz':
                     self.strong_bcs.append(fd.DirichletBC(self.Z.sub(0).sub(2), value, id))
+                elif type =='eta_interior':
+                    # Set internal dofs to zero to prevent singular matrix for free surface equation
+                    self.strong_bcs.append(InteriorBC(self.Z.sub(2), value, id))
                 else:
                     weak_bc[type] = value
             self.weak_bcs[id] = weak_bc
@@ -145,6 +166,12 @@ class StokesSolver:
         self.F = 0
         for test, eq, u in zip(self.test, self.equations, fd.split(self.solution)):
             self.F -= eq.residual(test, u, u, self.fields, bcs=self.weak_bcs)
+
+        print("equations", equations.__class__) 
+        print("self.equations", self.equations.__class__) 
+        if equations==FreeSurfaceStokesEquations:
+            print("hello mass term dt")
+            self.F += self.equations[2].mass_term(self.test[2], (eta-eta_old)/self.dt)
 
         if self.solver_parameters is None:
             if self.linear:
@@ -180,4 +207,8 @@ class StokesSolver:
     def solve(self):
         if not self._solver_setup:
             self.setup_solver()
+       # if self.equations.__class__==FreeSurfaceStokesEquations:
+        self.solution_old.assign(self.solution)
+        print("hello old eta")
+
         self.solver.solve()
