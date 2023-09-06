@@ -9,7 +9,7 @@ def viscous_freesurface_model(nx, dt_factor):
 
     # Set up geometry:
     D = 3e6 # length of domain in m
-    lam = D/8 # wavelength of load in m
+    lam = D/2 # wavelength of load in m
     L = D #lam # Depth of the domain in m
     ny = nx
     mesh = RectangleMesh(nx, ny, L, D)  # Rectangle mesh generated via firedrake
@@ -147,7 +147,7 @@ def viscous_freesurface_model(nx, dt_factor):
     return final_error, error_tau 
 
 
-dt_factors = [0.5]#1,0.5,0.25, 0.125]#, 0.125, 0.0625, 0.03125]
+dt_factors = [2,1,0.5,0.25, 0.125]#, 0.125, 0.0625, 0.03125]
 errors = np.array([viscous_freesurface_model(80, dtf) for dtf in dt_factors]) 
 conv = np.log(errors[:-1]/errors[1:])/np.log(2)
 

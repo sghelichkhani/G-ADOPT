@@ -43,16 +43,16 @@ u, p = z.split() #subfunctions  # Do this first to extract individual velocity a
 u.rename("Displacement")
 p.rename("Pressure")
 # Create output file and select output_frequency:
-output_file = File("output_elastic_0.5D_mu1e11_nonull_prestressadv.pvd")
+output_file = File("output_elastic_0.25D_mu1e11_nonull_noprestressadv_posiceheight.pvd")
 
 rho0 = 4500 # density in kg/m^3
 g = 10 # gravitational acceleration in m/s^2
 
-lam = D/2 # wavelength of load in m
+lam = D/4 # wavelength of load in m
 k = 2 * pi / lam # wavenumber in m^-1
 F0 = 1000 # initial free surface amplitude in m
 X = SpatialCoordinate(mesh)
-eta = F0 * cos(k * X[0])
+eta = F0 * (1 - cos(k * X[0]))
 n = FacetNormal(mesh)
 
 stokes_bcs = {
@@ -63,7 +63,7 @@ stokes_bcs = {
 }
 stokes_fields = {
         'surface_id': 4, # surface id for prestress advection
-        'rhog': 0 # rho*g for prestress advection
+        'rhog': 45000 # rho*g for prestress advection
          }
 
 stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs, mu=mu,

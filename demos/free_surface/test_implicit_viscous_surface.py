@@ -148,7 +148,7 @@ def implicit_viscous_freesurface_model(nx, dt_factor):
     return final_error #, error_tau 
 
 
-dt_factors = [1,0.5,0.25]#, 0.125]#, 0.125, 0.0625, 0.03125]
+dt_factors = [4, 2, 1,0.5,0.25, 0.125]#, 0.125]#, 0.125, 0.0625, 0.03125]
 errors = np.array([implicit_viscous_freesurface_model(80, dtf) for dtf in dt_factors]) 
 conv = np.log(errors[:-1]/errors[1:])/np.log(2)
 
