@@ -184,6 +184,7 @@ class DivergenceTerm(BaseTerm):
         return F
 
 
+
 class MomentumSourceTerm(BaseTerm):
     def residual(self, test, trial, trial_lagged, fields, bcs):
         if 'source' not in fields:
@@ -206,10 +207,12 @@ class PrestressAdvectionFreeSurfaceTerm(BaseTerm):
         phi = test
         u = trial  # incremental displacement
         displacement_old = fields['displacement']
-        displacement_current = u + displacement_old
+#        displacement_current = u + displacement_old
+        displacement_current = displacement_old
+        #displacement_current =  u #displacement_old  # martinec maybe...
         un = dot(displacement_current, n) * n
-        F = -dot(phi, rhog * un)*self.ds(surface_id)
-
+        F = dot(phi, rhog * un)*self.ds(surface_id)
+    #    F -= displacement_current[1]*rhog*div(phi)*self.dx
         return -F
 
 
@@ -248,10 +251,10 @@ class PreviousStressTerm(BaseTerm):
 #        if compressible:
 #            previous_stress -= 2/3 * mu * Identity(self.dim) * div(u)
 
-#        F = inner(grad_test, previous_stress)*self.dx
-        F = -dot(phi, div(previous_stress))*self.dx
+        F = inner(grad_test, previous_stress)*self.dx
+  #      F = -dot(phi, div(previous_stress))*self.dx
 
-        return -F
+        return -F  
 
 
 class MomentumEquation(BaseEquation):
