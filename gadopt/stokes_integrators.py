@@ -111,6 +111,7 @@ class StokesSolver:
             self.equations = equations(self.Z, self.Z, quad_degree=quad_degree,
                                    compressible=approximation.compressible)
         self.solution = z
+        self.solution_old = fd.Function(self.solution)
         self.approximation = approximation
         self.mu = ensure_constant(mu)
         self.solver_parameters = solver_parameters
@@ -121,7 +122,6 @@ class StokesSolver:
         if equations==FreeSurfaceStokesEquations:
             print("implicit free surface stokes")
             u, p, eta = fd.split(self.solution)
-            self.solution_old = fd.Function(self.solution)
             u_old, p_old, eta_old = fd.split(self.solution_old)
             theta = 0.5
             eta_theta = (1-theta)*eta_old + theta*eta
@@ -137,12 +137,15 @@ class StokesSolver:
             'interior_penalty': fd.Constant(6.25),  # matches C_ip=100. in "old" code for Q2Q1 in 2d
             'source': self.approximation.buoyancy(p, T) * self.k,
             'rho_continuity': self.approximation.rho_continuity(),
-            'eta': eta_theta  # free surface variable
             }
 
+        if equations==FreeSurfaceStokesEquations:
+            self.fields['eta'] = eta_theta  # free surface variable
+            print("hello eta!!!")
         for key, value in additional_fields.items():
             self.fields[key] = value
-
+        
+        print(self.fields['viscosity'].values()[0])
         self.weak_bcs = {}
         self.strong_bcs = []
         for id, bc in bcs.items():
@@ -208,7 +211,6 @@ class StokesSolver:
         if not self._solver_setup:
             self.setup_solver()
        # if self.equations.__class__==FreeSurfaceStokesEquations:
-        self.solution_old.assign(self.solution)
-        print("hello old eta")
+        self.solution_old.assign(self.solution)  # need this for implicit free sufarce
 
         self.solver.solve()
