@@ -105,7 +105,7 @@ def viscoelastic_model(nx, dt_factor):
     # Create output file and select output_frequency:
     filename=os.path.join(output_directory, "viscoelastic")
     if OUTPUT:
-        output_file = File(filename+"_D3e6_visc1e21_shearmod1e11_nx"+str(nx)+"_dt"+str(dt_factor)+"tau_posH_4lam_sepPreStress_mu1e11_dte1_cranknic_newprestress_deviatoric2.pvd")
+        output_file = File(filename+"_D3e6_visc1e21_shearmod1e11_nx"+str(nx)+"_dt"+str(dt_factor)+"tau_posH_4lam_sepPreStress_mu1e11_dte1_cranknic_newprestress_deviatoric2_movemesh.pvd")
 
     stokes_bcs = {
         bottom_id: {'un': 0},
@@ -153,6 +153,13 @@ def viscoelastic_model(nx, dt_factor):
 
         displacement.interpolate(displacement+u)
         eta_midpoint.append(displacement.at(L/2, -0.001)[1])
+
+        Vc = mesh.coordinates.function_space()
+        x, y = SpatialCoordinate(mesh)
+        f = Function(Vc).interpolate(as_vector([x+u_[0], y+u_[1]]))
+        mesh.coordinates.assign(f)
+
+
 #        if timestep ==2:
 #            with open(filename+"_D3e6_visc1e21_shearmod1e11_nx"+str(nx)+"_dt"+str(dt_factor)+"tau_be_a4_ny"+str(ny)+"_lam"+str(lam)+"_L"+str(L)+"_prestressadvsurf.txt", 'w') as file:
 #                for line in eta_midpoint:
@@ -185,7 +192,7 @@ def viscoelastic_model(nx, dt_factor):
 #dt_factors = [0.05,0.025 , 0.0125, 0.00625, 0.003125, 0.0015625, 0.00078125, 0.000390625]#, 0.125, 0.0625, 0.03125]
 dt_factors = [0.05*0.5**i for i in range(5)]#[0.05,0.025 , 0.0125, 0.00625, 0.003125, 0.0015625, 0.00078125, 0.000390625]#, 0.125, 0.0625, 0.03125]
 
-errors = np.array([viscoelastic_model(160, dtf) for dtf in dt_factors]) 
+errors = np.array([viscoelastic_model(80, dtf) for dtf in dt_factors]) 
 conv = np.log(errors[:-1]/errors[1:])/np.log(2)
 
 print('time surface displacement errors: ', errors[:])
