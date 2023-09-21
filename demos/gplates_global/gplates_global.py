@@ -3,7 +3,7 @@ from mpi4py import MPI
 import scipy.special
 import math
 import numpy as np
-#import libgplates
+import libgplates
 
 # Quadrature degree:
 dx = dx(degree=6)
@@ -35,9 +35,8 @@ domain_volume = assemble(1.*dx(domain=mesh))  # Required for diagnostics (e.g. R
 
 # Set up function spaces - currently using the bilinear Q2Q1 element pair:
 V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
-W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
+W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar) - also used for layer average T
 Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
-Q1 = FunctionSpace(mesh, "CG", 1)  # Average temperature function space (scalar, P1)
 Z = MixedFunctionSpace([V, W])  # Mixed function space.
 
 # Test functions and functions to hold solutions:
@@ -58,11 +57,11 @@ gplates_velocities = Function(V, name="GPlates_Velocity")
 
 # Set up temperature field and initialise:
 T = Function(Q, name="Temperature")
-Taverage = Function(Q1, name="Average Temperature")
-T_dev = Function(Q1, name="Temperature_Deviation")
+Taverage = Function(W, name="Average Temperature")
+T_dev = Function(W, name="Temperature_Deviation")
 r = sqrt(X[0]**2 + X[1]**2 + X[2]**2)
-theta = atan_2(X[1], X[0])  # Theta (longitude - different symbol to Zhong)
-phi = atan_2(sqrt(X[0]**2+X[1]**2), X[2])  # Phi (co-latitude - different symbol to Zhong)
+theta = atan2(X[1], X[0])  # Theta (longitude - different symbol to Zhong)
+phi = atan2(sqrt(X[0]**2+X[1]**2), X[2])  # Phi (co-latitude - different symbol to Zhong)
 k = as_vector((X[0]/r, X[1]/r, X[2]/r))  # Radial unit vector (in direction opposite to gravity)
 T0 = Constant(0.091)  # Non-dimensional surface temperature
 Di = Constant(0.5)  # Dissipation number.
@@ -135,7 +134,7 @@ chibar = Function(Q, name="IsothermalBulkModulus").assign(1.0)
 FullT = Function(Q, name="FullTemperature").assign(T+Tbar)
 
 # approximation = BoussinesqApproximation(Ra)
-approximation = AnelasticLiquidApproximation(Ra, Di, rho=rhobar, Tbar=Tbar, alpha=alphabar, chi=chibar, cp=cpbar)
+approximation = TruncatedAnelasticLiquidApproximation(Ra, Di, rho=rhobar, Tbar=Tbar, alpha=alphabar, chi=chibar, cp=cpbar)
 
 delta_t = Constant(1e-6)  # Initial time-step
 t_adapt = TimestepAdaptor(delta_t, V, maximum_timestep=5e-6, increase_tolerance=1.25)
@@ -143,16 +142,15 @@ max_timesteps = 1
 time = 0.0
 
 # Compute layer average for initial stage:
-averager = LayerAveraging(
-    mesh, np.linspace(rmin, rmax, nlayers * 2), cartesian=False, quad_degree=6)
+averager = LayerAveraging(mesh, np.linspace(rmin, rmax, nlayers * 2), cartesian=False, quad_degree=6)
 averager.extrapolate_layer_average(Taverage, averager.get_layer_average(FullT))
 
 # Nullspaces and near-nullspaces:
-Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=True)
+Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
 Z_near_nullspace = create_stokes_nullspace(Z, closed=False, rotational=True, translations=[0, 1, 2])
 
 # Write output files in VTK format:
-u, p = z.split()  # Do this first to extract individual velocity and pressure fields.
+u, p = z.subfunctions  # Do this first to extract individual velocity and pressure fields.
 # Next rename for output:
 u.rename("Velocity")
 p.rename("Pressure")
@@ -171,11 +169,10 @@ temp_bcs = {
 }
 stokes_bcs = {
     bottom_id: {'un': 0},
-    top_id: {'un': 0},    
-#    top_id: {'u': gplates_velocities},
+    top_id: {'u': gplates_velocities},
 }
 
-energy_solver = EnergySolver(T, u, approximation, delta_t, ImplicitMidpoint, bcs=temp_bcs)
+energy_solver = EnergySolver(T, u, approximation, delta_t, ImplicitMidpoint, bcs=temp_bcs, su_advection=True)
 energy_solver.fields['source'] = rhobar * H_int
 energy_solver.solver_parameters['ksp_converged_reason'] = None
 energy_solver.solver_parameters['ksp_rtol'] = 1e-4
@@ -191,13 +188,16 @@ stokes_solver.solver_parameters['fieldsplit_1']['ksp_converged_reason'] = None
 stokes_solver.solver_parameters['fieldsplit_1']['ksp_rtol'] = 5e-3
 
 # No-Slip (prescribed) boundary condition for the top surface
-#bc_gplates = DirichletBC(Z.sub(0), 0, (top_id))
-#boundary_X = X_val.dat.data_ro_with_halos[bc_gplates.nodes]
+bc_gplates = DirichletBC(Z.sub(0), 0, (top_id))
+boundary_X = X_val.dat.data_ro_with_halos[bc_gplates.nodes]
 
 # Get initial surface velocities:
-#libgplates.rec_model.set_time(model_time=time)
-#gplates_velocities.dat.data_with_halos[bc_gplates.nodes] = libgplates.rec_model.get_velocities(boundary_X)
+libgplates.rec_model.set_time(model_time=time)
+gplates_velocities.dat.data_with_halos[bc_gplates.nodes] = libgplates.rec_model.get_velocities(boundary_X)
 
+# Set up files for checkpointing:
+checkpoint_file = CheckpointFile("Checkpoint_State.h5", "w")
+checkpoint_file.save_mesh(mesh)
 
 # Now perform the time loop:
 for timestep in range(0, max_timesteps):
@@ -207,11 +207,11 @@ for timestep in range(0, max_timesteps):
         # compute radial temperature
         averager.extrapolate_layer_average(Taverage, averager.get_layer_average(FullT))
         # compute deviation from layer average
-        T_dev.assign(FullT-Taverage)
+        T_dev.project(FullT-Taverage)
         # interpolate viscosity
         muf.interpolate(mu)
         # write
-        output_file.write(u, p, FullT, T_dev, muf)
+        output_file.write(u, p, FullT, T_dev, muf, Taverage)
         ref_file.write(rhobar, Tbar, alphabar, cpbar, chibar)
 
     if timestep != 0:
@@ -227,15 +227,15 @@ for timestep in range(0, max_timesteps):
     energy_solver.solve()
 
     # Update surface velocities:
-#    libgplates.rec_model.set_time(model_time=time)
-#    gplates_velocities.dat.data_with_halos[bc_gplates.nodes] = libgplates.rec_model.get_velocities(boundary_X)
+    libgplates.rec_model.set_time(model_time=time)
+    gplates_velocities.dat.data_with_halos[bc_gplates.nodes] = libgplates.rec_model.get_velocities(boundary_X)
 
     # Compute diagnostics:
     u_rms = sqrt(assemble(dot(u, u) * dx)) * sqrt(1./domain_volume)
     nusselt_number_top = (assemble(dot(grad(FullT), n) * ds_t) / assemble(Constant(1.0, domain=mesh)*ds_t)) * (rmax*(rmax-rmin)/rmin)
     nusselt_number_base = (assemble(dot(grad(FullT), n) * ds_b) / assemble(Constant(1.0, domain=mesh)*ds_b)) * (rmin*(rmax-rmin)/rmax)
     energy_conservation = abs(abs(nusselt_number_top) - abs(nusselt_number_base))
-    average_temperature = assemble(T * dx) / domain_volume
+    average_temperature = assemble(FullT * dx) / domain_volume
     max_viscosity = muf.dat.data.max()
     max_viscosity = muf.comm.allreduce(max_viscosity, MPI.MAX)
     min_viscosity = muf.dat.data.min()
@@ -252,22 +252,14 @@ for timestep in range(0, max_timesteps):
 
     # Checkpointing:
     if timestep % checkpoint_period == 0:
-        # Checkpointing during simulation:
-        checkpoint_data = DumbCheckpoint(f"Temperature_State_{timestep}", mode=FILE_CREATE)
-        checkpoint_data.store(T, name="Temperature")
-        checkpoint_data.close()
-
-        checkpoint_data = DumbCheckpoint(f"Stokes_State_{timestep}", mode=FILE_CREATE)
-        checkpoint_data.store(z, name="Stokes")
-        checkpoint_data.close()
+        checkpoint_file.save_function(T, name="Temperature", idx=timestep)
+        checkpoint_file.save_function(z, name="Stokes", idx=timestep)
 
 plog.close()
+checkpoint_file.close()
 
 # Write final state:
-final_checkpoint_data = DumbCheckpoint("Final_Temperature_State", mode=FILE_CREATE)
-final_checkpoint_data.store(T, name="Temperature")
-final_checkpoint_data.close()
-
-final_checkpoint_data = DumbCheckpoint("Final_Stokes_State", mode=FILE_CREATE)
-final_checkpoint_data.store(z, name="Stokes")
-final_checkpoint_data.close()
+with CheckpointFile("Final_State.h5", "w") as final_checkpoint:
+    final_checkpoint.save_mesh(mesh)
+    final_checkpoint.save_function(T, name="Temperature")
+    final_checkpoint.save_function(z, name="Stokes")
