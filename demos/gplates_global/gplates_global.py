@@ -137,12 +137,12 @@ FullT = Function(Q, name="FullTemperature").assign(T+Tbar)
 approximation = TruncatedAnelasticLiquidApproximation(Ra, Di, rho=rhobar, Tbar=Tbar, alpha=alphabar, chi=chibar, cp=cpbar)
 
 delta_t = Constant(1e-6)  # Initial time-step
-t_adapt = TimestepAdaptor(delta_t, V, maximum_timestep=5e-6, increase_tolerance=1.25)
+t_adapt = TimestepAdaptor(delta_t, V, target_cfl=2.5, maximum_timestep=5e-6, increase_tolerance=1.5)
 max_timesteps = 1
 time = 0.0
 
 # Compute layer average for initial stage:
-averager = LayerAveraging(mesh, np.linspace(rmin, rmax, nlayers * 2), cartesian=False, quad_degree=6)
+averager = LayerAveraging(mesh, cartesian=False, quad_degree=6)
 averager.extrapolate_layer_average(Taverage, averager.get_layer_average(FullT))
 
 # Nullspaces and near-nullspaces:
@@ -180,12 +180,20 @@ stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs, mu=mu,
                              cartesian=False,
                              nullspace=Z_nullspace, transpose_nullspace=Z_nullspace,
                              near_nullspace=Z_near_nullspace)
-stokes_solver.solver_parameters['snes_type'] = "ksponly"
 stokes_solver.solver_parameters['snes_rtol'] = 5e-2
 stokes_solver.solver_parameters['fieldsplit_0']['ksp_converged_reason'] = None
 stokes_solver.solver_parameters['fieldsplit_0']['ksp_rtol'] = 5e-4
 stokes_solver.solver_parameters['fieldsplit_1']['ksp_converged_reason'] = None
 stokes_solver.solver_parameters['fieldsplit_1']['ksp_rtol'] = 5e-3
+
+# Solver parameters for projection:
+project_solver_parameters = {
+    "snes_type": "ksponly",
+    "ksp_type": "gmres",
+    "pc_type": "sor",
+    "mat_type": "aij",
+    "ksp_rtol": 1e-7,
+}
 
 # No-Slip (prescribed) boundary condition for the top surface
 bc_gplates = DirichletBC(Z.sub(0), 0, (top_id))
@@ -207,7 +215,7 @@ for timestep in range(0, max_timesteps):
         # compute radial temperature
         averager.extrapolate_layer_average(Taverage, averager.get_layer_average(FullT))
         # compute deviation from layer average
-        T_dev.project(FullT-Taverage)
+        T_dev.project(FullT-Taverage, solver_parameters=project_solver_parameters)
         # interpolate viscosity
         muf.interpolate(mu)
         # write
