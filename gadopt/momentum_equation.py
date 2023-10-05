@@ -207,8 +207,8 @@ class PrestressAdvectionFreeSurfaceTerm(BaseTerm):
         phi = test
         u = trial  # incremental displacement
         displacement_old = fields['displacement']
-#        displacement_current = u + displacement_old
-        displacement_current = displacement_old
+        displacement_current = u + displacement_old
+#        displacement_current = displacement_old
         #displacement_current =  u #displacement_old  # martinec maybe...
         un = dot(displacement_current, n) * n
         F = dot(phi, rhog * un)*self.ds(surface_id)

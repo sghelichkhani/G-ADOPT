@@ -145,7 +145,6 @@ class StokesSolver:
         for key, value in additional_fields.items():
             self.fields[key] = value
         
-        print(self.fields['viscosity'].values()[0])
         self.weak_bcs = {}
         self.strong_bcs = []
         for id, bc in bcs.items():
