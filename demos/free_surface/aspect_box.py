@@ -4,13 +4,18 @@ from gadopt import *
 from mpi4py import MPI
 import os
 import numpy as np
-OUTPUT=True
-output_directory="/data/free_surface/2d_box/viscoelastic/aspect_box/"
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("date", help="date format: dd.mm.yy")
+args = parser.parse_args()
 
     
+OUTPUT=True
+output_directory="/g/data/vo05/ws9229/viscoelastic/aspect_box/"
 # Set up geometry:
-dx = 150e3  # horizontal grid resolution
-dz = 150e3  # vertical grid resolution
+dx = 10e3  # horizontal grid resolution
+dz = 25e3  # vertical grid resolution
 L = 1500e3  # length of the domain in m
 
 
@@ -96,7 +101,7 @@ dt_elastic = Constant(dt)
 Tend = Constant(200* year_in_seconds)
 max_timesteps = round(Tend/dt)
 print("max timesteps", max_timesteps)
-dump_period = round(Tend / (10*year_in_seconds)) #0.5*tau0/dt)
+dump_period = round(10) #0.5*tau0/dt)
 print("dump_period", dump_period)
 print("dt", dt.values()[0])
 #effective_viscosity = Constant(viscosity/(maxwell_time +dt_elastic/2))
@@ -140,9 +145,9 @@ steady_state_tolerance = 1e-9
 u_.rename("Incremental Displacement")
 p_.rename("Pressure")
 # Create output file and select output_frequency:
-filename=os.path.join(output_directory, "viscoelastic")
+filename=os.path.join(output_directory, str(args.date)+"_viscoelastic")
 if OUTPUT:
-    output_file = File(filename+"_weerdesteijn_aspectbox_nx"+str(nx)+"_dt"+str(round(dt/year_in_seconds))+"years_dtout_10years_Tend200years_withprestressadv_fixramp/out.pvd")
+    output_file = File(filename+"_weerdesteijn_aspectbox_nx"+str(nx)+"_nz"+str(nz)+"_dt"+str(round(dt/year_in_seconds))+"years_dtout25years_Tend200years_withprestressadv_fixramp/out.pvd")
 stokes_bcs = {
     bottom_id: {'un': 0},
 #        top_id: {'stress': -rho0 * g * (eta + dot(displacement, n)) * n},
@@ -201,7 +206,7 @@ for timestep in range(1, max_timesteps+1):#int(max_timesteps/2)+1):
 
     ramp.assign(conditional(time < 100*year_in_seconds, 
         time/ (100*year_in_seconds), 1))
-    print(ramp.values()[0]) 
+#    print(ramp.values()[0]) 
     ice_load.interpolate(ramp * rho_ice * g *Hice* disc)
 
     stokes_solver.solve()
