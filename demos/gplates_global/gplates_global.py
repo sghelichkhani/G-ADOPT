@@ -186,15 +186,6 @@ stokes_solver.solver_parameters['fieldsplit_0']['ksp_rtol'] = 5e-4
 stokes_solver.solver_parameters['fieldsplit_1']['ksp_converged_reason'] = None
 stokes_solver.solver_parameters['fieldsplit_1']['ksp_rtol'] = 5e-3
 
-# Solver parameters for projection:
-project_solver_parameters = {
-    "snes_type": "ksponly",
-    "ksp_type": "gmres",
-    "pc_type": "sor",
-    "mat_type": "aij",
-    "ksp_rtol": 1e-7,
-}
-
 # No-Slip (prescribed) boundary condition for the top surface
 bc_gplates = DirichletBC(Z.sub(0), 0, (top_id))
 boundary_X = X_val.dat.data_ro_with_halos[bc_gplates.nodes]
@@ -215,7 +206,7 @@ for timestep in range(0, max_timesteps):
         # compute radial temperature
         averager.extrapolate_layer_average(T_avg, averager.get_layer_average(FullT))
         # compute deviation from layer average
-        T_dev.project(FullT-T_avg, solver_parameters=project_solver_parameter)
+        T_dev.assign(FullT-T_avg)
         # interpolate viscosity
         muf.interpolate(mu)
         # write
