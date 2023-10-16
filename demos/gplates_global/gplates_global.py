@@ -57,8 +57,6 @@ gplates_velocities = Function(V, name="GPlates_Velocity")
 
 # Set up temperature field and initialise:
 T = Function(Q, name="Temperature")
-Taverage = Function(W, name="Average Temperature")
-T_dev = Function(W, name="Temperature_Deviation")
 r = sqrt(X[0]**2 + X[1]**2 + X[2]**2)
 theta = atan2(X[1], X[0])  # Theta (longitude - different symbol to Zhong)
 phi = atan2(sqrt(X[0]**2+X[1]**2), X[2])  # Phi (co-latitude - different symbol to Zhong)
@@ -137,13 +135,15 @@ FullT = Function(Q, name="FullTemperature").assign(T+Tbar)
 approximation = TruncatedAnelasticLiquidApproximation(Ra, Di, rho=rhobar, Tbar=Tbar, alpha=alphabar, chi=chibar, cp=cpbar)
 
 delta_t = Constant(1e-6)  # Initial time-step
-t_adapt = TimestepAdaptor(delta_t, V, target_cfl=2.5, maximum_timestep=5e-6, increase_tolerance=1.5)
+t_adapt = TimestepAdaptor(delta_t, u, V, target_cfl=2.5, maximum_timestep=5e-6, increase_tolerance=1.5)
 max_timesteps = 1
 time = 0.0
 
 # Compute layer average for initial stage:
+T_avg = Function(Q, name="Average Temperature")
+T_dev = Function(Q, name="Temperature_Deviation")
 averager = LayerAveraging(mesh, cartesian=False, quad_degree=6)
-averager.extrapolate_layer_average(Taverage, averager.get_layer_average(FullT))
+averager.extrapolate_layer_average(T_avg, averager.get_layer_average(FullT))
 
 # Nullspaces and near-nullspaces:
 Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
@@ -213,17 +213,17 @@ for timestep in range(0, max_timesteps):
     # Write output:
     if timestep % dump_period == 0:
         # compute radial temperature
-        averager.extrapolate_layer_average(Taverage, averager.get_layer_average(FullT))
+        averager.extrapolate_layer_average(T_avg, averager.get_layer_average(FullT))
         # compute deviation from layer average
-        T_dev.project(FullT-Taverage, solver_parameters=project_solver_parameters)
+        T_dev.project(FullT-T_avg, solver_parameters=project_solver_parameter)
         # interpolate viscosity
         muf.interpolate(mu)
         # write
-        output_file.write(u, p, FullT, T_dev, muf, Taverage)
+        output_file.write(u, p, FullT, T_dev, muf, T_avg)
         ref_file.write(rhobar, Tbar, alphabar, cpbar, chibar)
 
     if timestep != 0:
-        dt = t_adapt.update_timestep(u)
+        dt = t_adapt.update_timestep()
     else:
         dt = float(delta_t)
     time += dt
