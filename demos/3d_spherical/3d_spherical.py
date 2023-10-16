@@ -38,8 +38,8 @@ T = Function(Q, name="Temperature")
 T_dev = Function(Q, name="Temperature_Deviation")
 X = SpatialCoordinate(mesh)
 r = sqrt(X[0]**2 + X[1]**2 + X[2]**2)
-theta = atan_2(X[1], X[0])  # Theta (longitude - different symbol to Zhong)
-phi = atan_2(sqrt(X[0]**2+X[1]**2), X[2])  # Phi (co-latitude - different symbol to Zhong)
+theta = atan2(X[1], X[0])  # Theta (longitude - different symbol to Zhong)
+phi = atan2(sqrt(X[0]**2+X[1]**2), X[2])  # Phi (co-latitude - different symbol to Zhong)
 k = as_vector((X[0]/r, X[1]/r, X[2]/r))  # Radial unit vector (in direction opposite to gravity)
 
 conductive_term = rmin*(rmax - r) / (r*(rmax - rmin))
@@ -58,7 +58,6 @@ Ra = Constant(7e3)  # Rayleigh number
 approximation = BoussinesqApproximation(Ra)
 
 delta_t = Constant(1e-6)  # Initial time-step
-t_adapt = TimestepAdaptor(delta_t, V, maximum_timestep=0.1, increase_tolerance=1.5)
 
 # helper function to compute horizontal layer averages
 Tlayer = Function(Qlayer, name='LayerTemp')  # stores values of temp in one layer
@@ -101,6 +100,7 @@ plog = ParameterLog('params.log', mesh)
 plog.log_str("timestep time dt maxchange u_rms nu_top nu_base energy avg_t")
 
 gd = GeodynamicalDiagnostics(u, p, T, bottom_id, top_id)
+t_adapt = TimestepAdaptor(delta_t, u, V, maximum_timestep=0.1, increase_tolerance=1.5)
 
 temp_bcs = {
     bottom_id: {'T': 1.0},
@@ -132,7 +132,7 @@ for timestep in range(0, max_timesteps):
         output_file.write(u, p, T, T_dev)
 
     if timestep != 0:
-        dt = t_adapt.update_timestep(u)
+        dt = t_adapt.update_timestep()
     else:
         dt = float(delta_t)
     time += dt
