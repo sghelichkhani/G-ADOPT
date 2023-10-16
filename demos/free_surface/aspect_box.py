@@ -5,6 +5,7 @@ from mpi4py import MPI
 import os
 import numpy as np
 import argparse
+import pandas as pd
 
 parser = argparse.ArgumentParser()
 parser.add_argument("date", help="date format: dd.mm.yy")
@@ -14,10 +15,8 @@ args = parser.parse_args()
 OUTPUT=True
 output_directory="/g/data/vo05/ws9229/viscoelastic/aspect_box/"
 # Set up geometry:
-dx = 10e3  # horizontal grid resolution
-dz = 25e3  # vertical grid resolution
+dx = 5e3  # horizontal grid resolution
 L = 1500e3  # length of the domain in m
-
 
 # layer properties from spada et al 2011
 radius_values = [6371e3, 6301e3, 5951e3, 5701e3, 3480e3]
@@ -31,16 +30,33 @@ shear_modulus_values = [0.50605e11, 0.70363e11, 1.05490e11,2.28340e11, 0]
 
 viscosity_values = [1e40, 1e21, 1e21, 2e21, 0]
 
-D = radius_values[0]-radius_values[-1]
-
 nx = round(L/dx)
+
+D = radius_values[0]-radius_values[-1]
+nz = 80 
+dz = D / nz  # because of extrusion need to define dz after
 nz = round(D/dz)
 
-mesh = BoxMesh(nx, nx, nz, L, L, D) #, hexahedral=True)  # Rectangle mesh generated via firedrake
+
+#surface_mesh = SquareMesh(nx, nx, L)
+surface_mesh = Mesh("./aspect_box_refined_surface.msh")
+mesh = ExtrudedMesh(surface_mesh, nz, layer_height=dz)
+
 mesh.coordinates.dat.data[:, 2] -= D
 x,y, z = SpatialCoordinate(mesh)
 
-bottom_id, top_id = 5, 6  # Boundary IDs
+# rescale vertical resolution
+a = Constant(4)
+b = Constant(0)
+depth_c = 500.0
+z_scaled = z / D
+Cs = (1.-b) * sinh(a*z_scaled) / sinh(a) + b*(tanh(a*(z_scaled + 0.5))/(2*tanh(0.5*a)) - 0.5)
+Vc = mesh.coordinates.function_space()
+f = Function(Vc).interpolate(as_vector([x, y, depth_c*z_scaled + (D - depth_c)*Cs])) 
+mesh.coordinates.assign(f)
+x,y, z = SpatialCoordinate(mesh)
+
+bottom_id, top_id = "bottom", "top"  # Boundary IDs
 
 # Set up function spaces - currently using the bilinear Q2Q1 element pair:
 V = VectorFunctionSpace(mesh, "CG", 2)  # Displacement function space (vector)
@@ -84,6 +100,12 @@ for i in range(0,len(shear_modulus_values)-1):
             conditional(z >= radius_values[i+1] - radius_values[0],
                 conditional( z <= radius_values[i] - radius_values[0],
                     shear_modulus_values[i], shear_modulus), shear_modulus))
+density = Function(W, name="density")
+for i in range(0,len(density_values)-1):
+    density.interpolate(
+            conditional(z >= radius_values[i+1] - radius_values[0],
+                conditional( z <= radius_values[i] - radius_values[0],
+                    density_values[i], density), density))
 
 maxwell_time = viscosity / shear_modulus
 
@@ -92,36 +114,61 @@ n = FacetNormal(mesh)
 time = Constant(0.0)
 
 year_in_seconds = Constant(3600 * 24 * 365.25)
-dt = Constant(2.5 * year_in_seconds)  # Initial time-step
+
+short_simulation = False
+
+if short_simulation:
+    dt = Constant(2.5 * year_in_seconds)  # Initial time-step
+else:
+    dt = Constant(50 * year_in_seconds)
 
 dt_elastic = Constant(dt)
 #    dt_elastic = conditional(dt_elastic<2*maxwell_time, 2*0.0125*tau0, dt_elastic)
 #    max_timesteps = round(20*tau0/dt_elastic)
 
-Tend = Constant(200* year_in_seconds)
+if short_simulation:
+    Tend = Constant(200* year_in_seconds)
+else:
+    Tend = Constant(110e3 * year_in_seconds)
+
 max_timesteps = round(Tend/dt)
 print("max timesteps", max_timesteps)
-dump_period = round(10) #0.5*tau0/dt)
+
+if short_simulation:
+    dt_out = Constant(10 * year_in_seconds)
+else:
+    dt_out = Constant(10e3 * year_in_seconds)
+
+dump_period = round(dt_out / dt)
 print("dump_period", dump_period)
 print("dt", dt.values()[0])
-#effective_viscosity = Constant(viscosity/(maxwell_time +dt_elastic/2))
-#prefactor_prestress = Constant((maxwell_time - dt_elastic/2)/(maxwell_time + dt_elastic/2))
-effective_viscosity = viscosity/(maxwell_time +dt)
-prefactor_prestress = maxwell_time/(maxwell_time + dt)
+
+
+effective_viscosity = viscosity/(maxwell_time +dt/2)
+prefactor_prestress = (maxwell_time - dt/2)/(maxwell_time + dt/2)
+#effective_viscosity = viscosity/(maxwell_time +dt)
+#prefactor_prestress = maxwell_time/(maxwell_time + dt)
 
 
 ice_load = Function(W)
+
+if short_simulation:
+    T1_load = 100 * year_in_seconds
+else:
+    T1_load = 90e3 * year_in_seconds
+
+T2_load = 100e3 * year_in_seconds
 
 ramp = Constant(0)
 Hice = 100
 
 disc_radius = 100e3
-disc = conditional(pow(x, 2)+ pow(y, 2) < pow(disc_radius,2), 1, 0)
+#disc = conditional(pow(x, 2)+ pow(y, 2) < pow(disc_radius,2), 1, 0)
+r = pow(pow(x, 2)+ pow(y, 2), 0.5)
+k_disc = 2*pi/(8*dx)  # wavenumber for disk 2pi / lambda 
+disc = 0.5*(1-tanh(k_disc *(r - disc_radius)))
 
 ice_load.interpolate(ramp * rho_ice * g *Hice* disc)
-
-
-
 
 u_, p_ = m.subfunctions
 
@@ -145,9 +192,10 @@ steady_state_tolerance = 1e-9
 u_.rename("Incremental Displacement")
 p_.rename("Pressure")
 # Create output file and select output_frequency:
-filename=os.path.join(output_directory, str(args.date)+"_viscoelastic")
+filename=os.path.join(output_directory, str(args.date))
+filename += "_viscoelastic_weerdesteijn_aspectbox_dx5kmto200km_nz"+str(nz)+"scaled_a"+str(a.values()[0])+"_dt"+str(round(dt/year_in_seconds))+"years_dtout"+str(dt_out.values()[0])+"25years_Tend"+str(Tend.values()[0])+"years_extruded_tanh_zhongprefactor_oldFD_advsurfon_oldvom/"
 if OUTPUT:
-    output_file = File(filename+"_weerdesteijn_aspectbox_nx"+str(nx)+"_nz"+str(nz)+"_dt"+str(round(dt/year_in_seconds))+"years_dtout25years_Tend200years_withprestressadv_fixramp/out.pvd")
+    output_file = File(filename+"out.pvd")
 stokes_bcs = {
     bottom_id: {'un': 0},
 #        top_id: {'stress': -rho0 * g * (eta + dot(displacement, n)) * n},
@@ -162,7 +210,7 @@ stokes_bcs = {
 
 up_fields = {}
 stokes_fields = {
-    'surface_id': 4,  # VERY HACKY!
+    'surface_id': top_id,  # VERY HACKY!
     'previous_stress': previous_stress,  # VERY HACKY!
     'displacement': displacement,
     'rhog': density_values[0]*g}  # Incredibly hacky! rho*g
@@ -200,12 +248,50 @@ if OUTPUT:
 eta_midpoint =[]
 #eta_midpoint.append(displacement.at(L/2+100, -0.001)[1])
 
+displacement_vom_matplotlib_df = pd.DataFrame()
+surface_nodes = []
+surface_dx = 1000
+surface_nx = round(L /surface_dx)
+
+distance_from_centre =[]
+
+for i in range(surface_nx):
+    surface_nodes.append([i*surface_dx, i*surface_dx, -0.1])
+
+surface_VOM = VertexOnlyMesh(mesh,surface_nodes, missing_points_behaviour='warn')
+DG0_vom = FunctionSpace(surface_VOM, "DG", 0)
+displacement_vom = Function(DG0_vom)
+
+#DG0_vom_input_ordering = FunctionSpace(surface_VOM.input_ordering, "DG", 0)
+#displacement_vom_input = Function(DG0_vom_input_ordering)
+
+def displacement_vom_out(t):
+    displacement_vom.interpolate(displacement[2])
+    #displacement_vom_input.interpolate(displacement_vom) # new vom
+    displacement_vom_array = displacement_vom.dat.data  # old vom
+    displacement_vom_array = mesh.comm.gather(displacement_vom_array, root=0) # old vom
+    if mesh.comm.rank == 0:
+        # concatenate arrays
+        displacement_vom_array_f = np.concatenate(displacement_vom_array)  # old vom
+        displacement_vom_matplotlib_df['displacement_vom_array_{:.0f}years'.format(t/year_in_seconds.values()[0])] = displacement_vom_array_f # old vom need displacement_vom_input for new...
+        t_inyears = t / year_in_seconds.values()[0]
+    #    displacement_vom_matplotlib_df['displacement_vom_array_{:.0f}years'.format(t_inyears)] = displacement_vom_input.dat.data  # new
+        displacement_vom_matplotlib_df.to_csv(filename+"displacement_oldvom_arrays.csv")
+
+displacement_vom_out(0)
 error = 0
 # Now perform the time loop:
-for timestep in range(1, max_timesteps+1):#int(max_timesteps/2)+1):
 
-    ramp.assign(conditional(time < 100*year_in_seconds, 
-        time/ (100*year_in_seconds), 1))
+for timestep in range(1, max_timesteps+1):#int(max_timesteps/2)+1):
+    if short_simulation:
+        ramp.assign(conditional(time < T1_load, time / T1_load, 1))
+    else:
+        ramp.assign(conditional(time < T1_load, time / T1_load, 
+                                conditional(time < T2_load, 1 - (time - T1_load) / (T2_load - T1_load),
+                                            0)
+                                )
+                    )
+
 #    print(ramp.values()[0]) 
     ice_load.interpolate(ramp * rho_ice * g *Hice* disc)
 
@@ -213,14 +299,15 @@ for timestep in range(1, max_timesteps+1):#int(max_timesteps/2)+1):
  #   eta_timestepper.advance(time)
 
     u_old.assign(u_)  # (1-dt/dt_elastic)*u_old + (dt/dt_elastic)*u)
+    displacement.interpolate(displacement+u)
     #u_old.assign((1-dt/dt_elastic)*u_old + (dt/dt_elastic)*u_)
-    deviatoric_stress.interpolate(2 * effective_viscosity * sym(grad(u_old))+prefactor_prestress*deviatoric_stress)
+    deviatoric_stress.interpolate(2 * effective_viscosity * sym(grad(u_old))+prefactor_prestress*deviatoric_stress) # 13.10.23 this is what i had pre pbar...
+#    deviatoric_stress.interpolate(2 * effective_viscosity * sym(grad(u_old)) + density*g*displacement[2]*Identity(3) + prefactor_prestress*deviatoric_stress) i# 14.10.23 i think this is probably wrong
 #        averaged_deviatoric_stress.interpolate((1-dt/dt_elastic)*averaged_deviatoric_stress + (dt/dt_elastic)*deviatoric_stress)
     previous_stress.interpolate(prefactor_prestress*deviatoric_stress)  # most recent without elastic prestress
 #        previous_stress.interpolate(prefactor_prestress*averaged_deviatoric_stress)  # try elastic timestep
     #previous_stress.interpolate((dt/dt_elastic)*(prefactor_prestress* 2 * effective_viscosity * sym(grad(u_old))+prefactor_prestress*previous_stress)+(1-dt/dt_elastic)*previous_stress)
 
-    displacement.interpolate(displacement+u)
  #   eta_midpoint.append(displacement.at(L/2, -0.001)[1])
 #    eta_midpoint.append(eta_surf.at(L/2, -0.001))
 
@@ -253,6 +340,8 @@ for timestep in range(1, max_timesteps+1):#int(max_timesteps/2)+1):
         print("time", time.values()[0])
         if OUTPUT:
             output_file.write(u_, u_old, displacement, p_, previous_stress, shear_modulus, viscosity)
+#            displacement_vom.interpolate(displacement[2])
+    displacement_vom_out(time.values()[0])
     
 #with open(filename+"_D3e6_visc1e21_shearmod1e11_nx"+str(nx)+"_dt"+str(dt_factor)+"tau_a6_refinemesh_nosurfadv_expfreesurface.txt", 'w') as file:
 #    for line in eta_midpoint:
