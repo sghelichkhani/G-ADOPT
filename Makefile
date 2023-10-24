@@ -1,8 +1,6 @@
-.PHONY: lint test
+.PHONY: lint test longtest
 
 lint:
-	@echo "Linting Davies et. al"
-	@python3 -m flake8 Davies_etal_GMD_2021
 	@echo "Linting module code"
 	@python3 -m flake8 gadopt
 	@echo "Linting demos"
@@ -10,3 +8,9 @@ lint:
 
 test:
 	$(MAKE) -C demos
+
+longtest:
+	$(MAKE) -C demos longtest
+
+longtest_output:
+	$(MAKE) -C demos longtest_output

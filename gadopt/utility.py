@@ -3,8 +3,10 @@ A module with utitity functions for gadopt
 """
 from firedrake import outer, ds_v, ds_t, ds_b, CellDiameter, CellVolume, dot, JacobianInverse
 from firedrake import sqrt, Function, FiniteElement, TensorProductElement, FunctionSpace, VectorFunctionSpace
-from firedrake import as_vector, SpatialCoordinate, Constant, DirichletBC, utils
+from firedrake import as_vector, SpatialCoordinate, Constant, max_value, min_value, dx, assemble
+from firedrake import Interpolator, op2, interpolate, DirichletBC, utils
 import ufl
+import time
 from ufl.corealg.traversal import traverse_unique_terminals
 from firedrake.petsc import PETSc
 from mpi4py import MPI
@@ -12,6 +14,7 @@ import numpy as np
 import logging
 from logging import DEBUG, INFO, WARNING, ERROR, CRITICAL  # NOQA
 import os
+from scipy.linalg import solveh_banded
 
 # TBD: do we want our own set_log_level and use logging module with handlers?
 log_level = logging.getLevelName(os.environ.get("GADOPT_LOGLEVEL", "INFO").upper())
@@ -39,28 +42,46 @@ class ParameterLog:
 
 
 class TimestepAdaptor:
-    def __init__(self, dt_const, u_fs, target_cfl=1.0, increase_tolerance=1.5, maximum_timestep=None):
+    """
+    Computes timestep based on CFL condition for provided velocity field"""
+    def __init__(self, dt_const, u, V, target_cfl=1.0, increase_tolerance=1.5, maximum_timestep=None):
+        """
+        :arg dt_const:      Constant whose value will be updated by the timestep adaptor
+        :arg u:             Velocity to base CFL condition on
+        :arg V:             FunctionSpace for reference velocity, usually velocity space
+        :kwarg target_cfl:  CFL number to target with chosen timestep
+        :kwarg increase_tolerance: Maximum tolerance timestep is allowed to change by
+        :kwarg maximum_timestep:   Maximum allowable timestep"""
         self.dt_const = dt_const
-        self.u_fs = u_fs
+        self.u = u
         self.target_cfl = target_cfl
         self.increase_tolerance = increase_tolerance
         self.maximum_timestep = maximum_timestep
-        self.mesh = u_fs.mesh()
-        self.ref_vel = Function(self.u_fs, name="Reference_Velocity")
+        self.mesh = V.mesh()
 
-    def compute_timestep(self, u):
+        self.ref_vel = Function(V, name="Reference_Velocity")
+        # J^-1 u is a discontinuous expression, using op2.MAX it takes the maximum value
+        # in all adjacent elements when interpolating it to a continuous function space
+        # We do need to ensure we reset ref_vel to zero, as it also takes the max with any previous values
+        self.ref_vel_interpolator = Interpolator(abs(dot(JacobianInverse(self.mesh), self.u)), self.ref_vel, access=op2.MAX)
+
+    def compute_timestep(self):
         max_ts = float(self.dt_const)*self.increase_tolerance
         if self.maximum_timestep is not None:
             max_ts = min(max_ts, self.maximum_timestep)
 
-        self.ref_vel.interpolate(dot(JacobianInverse(self.mesh), u))
-        # NOTE; we're incorparing max_ts here before divinging by max. ref. vel. as it may be zero
-        ts = self.target_cfl / max(self.mesh.comm.allreduce(np.abs(self.ref_vel.dat.data.max()), MPI.MAX), self.target_cfl / max_ts)
+        # need to reset ref_vel to avoid taking max with previous values
+        self.ref_vel.assign(0)
+        self.ref_vel_interpolator.interpolate()
+        local_maxrefvel = self.ref_vel.dat.data.max()
+        max_refvel = self.mesh.comm.allreduce(local_maxrefvel, MPI.MAX)
+        # NOTE; we're incorparating max_ts here before dividing by max. ref. vel. as it may be zero
+        ts = self.target_cfl / max(max_refvel, self.target_cfl / max_ts)
 
         return ts
 
-    def update_timestep(self, u):
-        self.dt_const.assign(self.compute_timestep(u))
+    def update_timestep(self):
+        self.dt_const.assign(self.compute_timestep())
         return float(self.dt_const)
 
 
@@ -94,6 +115,7 @@ class CombinedSurfaceMeasure(ufl.Measure):
     A surface measure that combines ds_v, the integral over vertical boundary facets, and ds_t and ds_b,
     the integral over horizontal top and bottom facets. The vertical boundary facets are identified with
     the same surface ids as ds_v. The top and bottom surfaces are identified via the "top" and "bottom" ids."""
+
     def __init__(self, domain, degree):
         self.ds_v = ds_v(domain=domain, degree=degree)
         self.ds_t = ds_t(domain=domain, degree=degree)
@@ -256,6 +278,7 @@ class ExtrudedFunction(Function):
     The 3D function resides in V x R function space, where V is the function
     space of the source function. The 3D function shares the data of the 2D
     function."""
+
     def __init__(self, *args, mesh_3d=None, **kwargs):
         """
         Create a 2D :class:`Function` with a 3D view on extruded mesh.
@@ -312,3 +335,146 @@ class InteriorBC(DirichletBC):
     @utils.cached_property
     def nodes(self):
         return np.array(list(set(range(self._function_space.node_count)) - set(super().nodes)))
+class LayerAveraging:
+    """
+    A manager for computing a vertical profile of horizontal layer averages.
+    """
+
+    def __init__(self, mesh, r1d=None, cartesian=True, quad_degree=None):
+        """
+        Create the :class:`LayerAveraging` manager.
+        :arg mesh: The mesh over which to compute averages.
+        :kwarg r1d: An array of either depth coordinates or radii,
+             at which to compute layer averages. If not provided, and
+             mesh is extruded, it uses the same layer heights. If mesh
+             is not extruded, r1d is required.
+        :kwarg cartesian: Determines whether `r1d` represents depths or radii.
+        """
+
+        self.mesh = mesh
+        XYZ = SpatialCoordinate(mesh)
+
+        if cartesian:
+            self.r = XYZ[len(XYZ)-1]
+        else:
+            self.r = sqrt(dot(XYZ, XYZ))
+
+        self.dx = dx
+        if quad_degree is not None:
+            self.dx = dx(degree=quad_degree)
+
+        if r1d is not None:
+            self.r1d = r1d
+        else:
+            try:
+                nlayers = mesh.layers
+            except AttributeError:
+                raise ValueError("For non-extruded mesh need to specify depths array r1d.")
+            CG1 = FunctionSpace(mesh, "CG", 1)
+            r_func = interpolate(self.r, CG1)
+            self.r1d = r_func.dat.data[:nlayers]
+
+        self.mass = np.zeros((2, len(self.r1d)))
+        self.rhs = np.zeros(len(self.r1d))
+        self._assemble_mass()
+
+    def _assemble_mass(self):
+        # main diagonal of mass matrix
+        r = self.r
+        rc = Constant(self.r1d[0])
+        rn = Constant(self.r1d[1])
+        rp = Constant(0.)
+
+        # radial P1 hat function in rp < r < rn with maximum at rc
+        phi = max_value(min_value((r - rp) / (rc - rp), (rn - r) / (rn - rc)), 0)
+
+        for i, rin in enumerate(self.r1d[1:]):
+            rn.assign(rin)
+            self.mass[0, i] = assemble(phi**2 * self.dx)
+
+            # shuffle coefficients for next iteration
+            rp.assign(rc)
+            rc.assign(rn)
+
+        phi = max_value(min_value(1, (r - rp) / (rn - rp)), 0)
+        self.mass[0, -1] = assemble(phi**2 * self.dx)
+
+        # compute off-diagonal (symmetric)
+        rp = Constant(self.r1d[0])
+        rn = Constant(self.r1d[1])
+
+        # overlapping product between two basis functions in rp < r < rn
+        overlap = max_value((rn - r) / (rn - rp), 0) * max_value((r - rp) / (rn - rp), 0) * self.dx
+
+        for i, rin in enumerate(self.r1d[1:]):
+            rn.assign(rin)
+            self.mass[1, i] = assemble(overlap)
+
+            # shuffle coefficients for next iteration
+            rp.assign(rn)
+
+    def _assemble_rhs(self, T):
+        r = self.r
+        rc = Constant(self.r1d[0])
+        rn = Constant(self.r1d[1])
+        rp = Constant(0.)
+
+        phi = max_value(min_value((r - rp) / (rc - rp), (rn - r) / (rn - rc)), 0)
+
+        for i, rin in enumerate(self.r1d[1:]):
+            rn.assign(rin)
+            self.rhs[i] = assemble(phi * T * self.dx)
+
+            rp.assign(rc)
+            rc.assign(rn)
+
+        phi = max_value(min_value(1, (r - rp) / (rn - rp)), 0)
+        self.rhs[-1] = assemble(phi * T * self.dx)
+
+    def get_layer_average(self, T):
+        """
+        Compute the layer averages of :class:`Function` T at the predefined depths.
+        Returns a numpy array containing the averages.
+        """
+
+        self._assemble_rhs(T)
+        return solveh_banded(self.mass, self.rhs, lower=True)
+
+    def extrapolate_layer_average(self, u, avg):
+        """
+        Given an array of layer averages avg, extrapolate to :class:`Function` u
+        """
+
+        r = self.r
+        rc = Constant(self.r1d[0])
+        rn = Constant(self.r1d[1])
+        rp = Constant(0.)
+
+        u.assign(0.0)
+
+        phi = max_value(min_value((r - rp) / (rc - rp), (rn - r) / (rn - rc)), 0)
+        val = Constant(0.)
+
+        for a, rin in zip(avg[:-1], self.r1d[1:]):
+            val.assign(a)
+            rn.assign(rin)
+            # reconstruct this layer according to the basis function
+            u.interpolate(u + val * phi)
+
+            rp.assign(rc)
+            rc.assign(rn)
+
+        phi = max_value(min_value(1, (r - rp) / (rn - rp)), 0)
+        val.assign(avg[-1])
+        u.interpolate(u + val * phi)
+
+
+def timer_decorator(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        log(f"Time taken for {func.__name__}: {elapsed_time} seconds")
+        return result
+    return wrapper
