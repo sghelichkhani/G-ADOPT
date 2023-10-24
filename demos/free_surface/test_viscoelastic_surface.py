@@ -88,7 +88,7 @@ def viscoelastic_model(nx, dt_factor):
 
     u_, p_ = z.split()
 
-    TP1 = TensorFunctionSpace(mesh, "CG", 1)
+    TP1 = TensorFunctionSpace(mesh, "DG", 2)
     previous_stress = Function(TP1, name='previous_stress').interpolate(prefactor_prestress * 2 * effective_viscosity * sym(grad(u_old)))
     deviatoric_stress = Function(TP1, name='deviatoric_stress')
     averaged_deviatoric_stress = Function(TP1, name='averaged deviatoric_stress')
@@ -111,7 +111,7 @@ def viscoelastic_model(nx, dt_factor):
     # Create output file and select output_frequency:
     filename=os.path.join(output_directory, "viscoelastic")
     if OUTPUT:
-        output_file = File(filename+"_D3e6_visc1e21_shearmod1e11_nx"+str(nx)+"_dt"+str(dt_factor)+"tau_posH_4lam_sepPreStress_mu1e11_surfadv_hydpres_corr_fixnx80.pvd")
+        output_file = File(filename+"_D3e6_visc1e21_shearmod1e11_nx"+str(nx)+"_dt"+str(dt_factor)+"tau_posH_4lam_sepPreStress_mu1e11_fixnx80_TDG2.pvd")
 
     stokes_bcs = {
         bottom_id: {'un': 0},
@@ -177,7 +177,7 @@ def viscoelastic_model(nx, dt_factor):
         u_old.assign(u_)  # (1-dt/dt_elastic)*u_old + (dt/dt_elastic)*u)
         displacement.interpolate(displacement+u)
         #u_old.assign((1-dt/dt_elastic)*u_old + (dt/dt_elastic)*u_)
-       deviatoric_stress.interpolate(2 * effective_viscosity * sym(grad(u_old))+prefactor_prestress*deviatoric_stress)  # 
+        deviatoric_stress.interpolate(2 * effective_viscosity * sym(grad(u_old))+prefactor_prestress*deviatoric_stress)  # 
 #        averaged_deviatoric_stress.interpolate((1-dt/dt_elastic)*averaged_deviatoric_stress + (dt/dt_elastic)*deviatoric_stress)
 #        deviatoric_stress.interpolate(2 * effective_viscosity * sym(grad(u_old)) + rho0*g*displacement[1]*Identity(2) + prefactor_prestress*deviatoric_stress)  # 14.10.23 hydrostatic prestress correction probably wrong
         previous_stress.interpolate(prefactor_prestress*deviatoric_stress)  # most recent without elastic prestress
@@ -216,7 +216,7 @@ def viscoelastic_model(nx, dt_factor):
             if OUTPUT:
                 output_file.write(u_, u_old, displacement, p_, previous_stress, eta_analytical)
         
-    with open(filename+"_D3e6_visc1e21_shearmod1e11_nx"+str(nx)+"_dt"+str(dt_factor)+"tau_a6_refinemesh_surfadv_hydpres_corr_fixnx80.txt", 'w') as file:
+    with open(filename+"_D3e6_visc1e21_shearmod1e11_nx"+str(nx)+"_dt"+str(dt_factor)+"tau_a4_fixnx80_TDG2.txt", 'w') as file:
         for line in eta_midpoint:
             file.write(f"{line}\n")
     final_error = pow(error,0.5)/L
