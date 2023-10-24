@@ -6,7 +6,6 @@ import os
 import numpy as np
 import argparse
 import pandas as pd
-
 parser = argparse.ArgumentParser()
 parser.add_argument("date", help="date format: dd.mm.yy")
 args = parser.parse_args()
@@ -37,26 +36,34 @@ nz = 80
 dz = D / nz  # because of extrusion need to define dz after
 nz = round(D/dz)
 
+LOAD_CHECKPOINT = False
 
-#surface_mesh = SquareMesh(nx, nx, L)
-surface_mesh = Mesh("./aspect_box_refined_surface.msh")
-mesh = ExtrudedMesh(surface_mesh, nz, layer_height=dz)
+checkpoint_file = "/g/data/vo05/ws9229/viscoelastic/aspect_box/17.10.23_208cores_viscoelastic_weerdesteijn_aspectbox_dx5kmto200km_nz80scaled_a4.0_dt2years_dtout225years_Tend5years_extruded_zhongprefactor_oldFD_checkpoint/Checkpoint_State.h5"
 
-mesh.coordinates.dat.data[:, 2] -= D
-x,y, z = SpatialCoordinate(mesh)
+if LOAD_CHECKPOINT: 
+    with CheckpointFile(checkpoint_file, 'r') as afile:
+        mesh = afile.load_mesh("surface_mesh_extruded")
+else:
+    surface_mesh = SquareMesh(10, 10, L)
+#    surface_mesh = Mesh("./aspect_box_refined_surface.msh", name="surface_mesh")
+#    mesh = ExtrudedMesh(surface_mesh, nz, layer_height=dz)
+    mesh = BoxMesh(10,10,10,L,L,D)
+    mesh.coordinates.dat.data[:, 2] -= D
+    x, y, z = SpatialCoordinate(mesh)
+    # rescale vertical resolution
+    a = Constant(4)
+    b = Constant(0)
+    depth_c = 500.0
+    z_scaled = z / D
+    Cs = (1.-b) * sinh(a*z_scaled) / sinh(a) + b*(tanh(a*(z_scaled + 0.5))/(2*tanh(0.5*a)) - 0.5)
+    Vc = mesh.coordinates.function_space()
+    f = Function(Vc).interpolate(as_vector([x, y, depth_c*z_scaled + (D - depth_c)*Cs])) 
+    mesh.coordinates.assign(f)
 
-# rescale vertical resolution
-a = Constant(4)
-b = Constant(0)
-depth_c = 500.0
-z_scaled = z / D
-Cs = (1.-b) * sinh(a*z_scaled) / sinh(a) + b*(tanh(a*(z_scaled + 0.5))/(2*tanh(0.5*a)) - 0.5)
-Vc = mesh.coordinates.function_space()
-f = Function(Vc).interpolate(as_vector([x, y, depth_c*z_scaled + (D - depth_c)*Cs])) 
-mesh.coordinates.assign(f)
-x,y, z = SpatialCoordinate(mesh)
+x, y, z = SpatialCoordinate(mesh)
 
-bottom_id, top_id = "bottom", "top"  # Boundary IDs
+#bottom_id, top_id = "bottom", "top"  # Boundary IDs
+bottom_id, top_id = 5, 6  # Boundary IDs
 
 # Set up function spaces - currently using the bilinear Q2Q1 element pair:
 V = VectorFunctionSpace(mesh, "CG", 2)  # Displacement function space (vector)
@@ -64,14 +71,25 @@ W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
 Q = FunctionSpace(mesh, "CG", 2)  # Temperature function space (scalar)
 Q3 = FunctionSpace(mesh, "CG", 3)  # Temperature function space (scalar)
 M = MixedFunctionSpace([V, W])  # Mixed function space.
+TP1 = TensorFunctionSpace(mesh, "DG", 2)
 
-# Function to store the solutions:
 m = Function(M)  # a field over the mixed function space M.
+# Function to store the solutions:
+if LOAD_CHECKPOINT: 
+    with CheckpointFile(checkpoint_file, 'r') as afile:
+        u_ = afile.load_function(mesh, name="Incremental Displacement")
+        p_ = afile.load_function(mesh, name="Pressure")
+        displacement = afile.load_function(mesh, name="Displacement")
+        deviatoric_stress = afile.load_function(mesh, name="Deviatoric stress")
+else:
+    u_, p_ = m.subfunctions
+    displacement = Function(V, name="displacement").assign(0)
+    deviatoric_stress = Function(TP1, name='deviatoric_stress')
+
 u, p = split(m)  # Returns symbolic UFL expression for u and p
 
 u_old = Function(V, name="u old")
-u_old.assign(0)
-displacement = Function(V, name="displacement").assign(0)
+u_old.assign(u_)
 
 #eta_surf = Function(W, name="eta")
 #eta_eq = FreeSurfaceEquation(W, W, surface_id=top_id)
@@ -94,12 +112,14 @@ for i in range(0,len(viscosity_values)-1):
             conditional(z >= radius_values[i+1] - radius_values[0],
                 conditional( z <= radius_values[i] - radius_values[0],
                     viscosity_values[i], viscosity), viscosity))
+
 shear_modulus = Function(W, name="shear modulus")
 for i in range(0,len(shear_modulus_values)-1):
     shear_modulus.interpolate(
             conditional(z >= radius_values[i+1] - radius_values[0],
                 conditional( z <= radius_values[i] - radius_values[0],
                     shear_modulus_values[i], shear_modulus), shear_modulus))
+
 density = Function(W, name="density")
 for i in range(0,len(density_values)-1):
     density.interpolate(
@@ -127,21 +147,21 @@ dt_elastic = Constant(dt)
 #    max_timesteps = round(20*tau0/dt_elastic)
 
 if short_simulation:
-    Tend = Constant(200* year_in_seconds)
+    Tend = Constant(200* year_in_seconds) # do a test of checkpointing
 else:
     Tend = Constant(110e3 * year_in_seconds)
 
 max_timesteps = round(Tend/dt)
-print("max timesteps", max_timesteps)
+log("max timesteps", max_timesteps)
 
 if short_simulation:
     dt_out = Constant(10 * year_in_seconds)
 else:
-    dt_out = Constant(10e3 * year_in_seconds)
+    dt_out = Constant(1e3 * year_in_seconds)
 
 dump_period = round(dt_out / dt)
-print("dump_period", dump_period)
-print("dt", dt.values()[0])
+log("dump_period", dump_period)
+log("dt", dt.values()[0])
 
 
 effective_viscosity = viscosity/(maxwell_time +dt/2)
@@ -160,7 +180,10 @@ else:
 T2_load = 100e3 * year_in_seconds
 
 ramp = Constant(0)
-Hice = 100
+if short_simulation:
+    Hice = 100
+else:
+    Hice = 1000
 
 disc_radius = 100e3
 #disc = conditional(pow(x, 2)+ pow(y, 2) < pow(disc_radius,2), 1, 0)
@@ -170,11 +193,8 @@ disc = 0.5*(1-tanh(k_disc *(r - disc_radius)))
 
 ice_load.interpolate(ramp * rho_ice * g *Hice* disc)
 
-u_, p_ = m.subfunctions
 
-TP1 = TensorFunctionSpace(mesh, "CG", 1)
-previous_stress = Function(TP1, name='previous_stress')
-deviatoric_stress = Function(TP1, name='deviatoric_stress')
+previous_stress = Function(TP1, name='previous_stress').interpolate(prefactor_prestress * deviatoric_stress)
 averaged_deviatoric_stress = Function(TP1, name='averaged deviatoric_stress')
 # previous_stress = prefactor_prestress *  2 * effective_viscosity * sym(grad(u_old))
 
@@ -193,27 +213,30 @@ u_.rename("Incremental Displacement")
 p_.rename("Pressure")
 # Create output file and select output_frequency:
 filename=os.path.join(output_directory, str(args.date))
-filename += "_viscoelastic_weerdesteijn_aspectbox_dx5kmto200km_nz"+str(nz)+"scaled_a"+str(a.values()[0])+"_dt"+str(round(dt/year_in_seconds))+"years_dtout"+str(dt_out.values()[0])+"25years_Tend"+str(Tend.values()[0])+"years_extruded_tanh_zhongprefactor_oldFD_advsurfon_oldvom/"
+filename += "_viscoelastic_weerdesteijn_aspectbox_dx5km_nz"+str(nz)+"scaled_a"+str(a.values()[0])+"_dt"+str(round(dt/year_in_seconds))+"years_dtout"+str(round(dt_out.values()[0]/year_in_seconds))+"years_Tend"+str(round(Tend.values()[0]/year_in_seconds))+"years_extruded_zhongprefactor_oldFD_weakbcs_TDG2interp_coarse_strongbcs_box/"
 if OUTPUT:
     output_file = File(filename+"out.pvd")
 stokes_bcs = {
-    bottom_id: {'un': 0},
+    bottom_id: {'uz': 0},
 #        top_id: {'stress': -rho0 * g * (eta + dot(displacement, n)) * n},
 #        top_id: {'stress': -rho0 * g * eta * n},
     top_id: {'stress': -ice_load*n },
     #    top_id: {'old_stress': prefactor_prestress*(-rho0 * g * (eta + dot(displacement,n)) * n)},
-    1: {'un': 0},
-    2: {'un': 0},
-    3: {'un': 0},
-    4: {'un': 0},
+    1: {'ux': 0},
+    2: {'ux': 0},
+    3: {'uy': 0},
+    4: {'uy': 0},
 }
+
+mom_source = as_vector((0,0,-1))*g*(-dot(displacement, grad(density)))
 
 up_fields = {}
 stokes_fields = {
     'surface_id': top_id,  # VERY HACKY!
     'previous_stress': previous_stress,  # VERY HACKY!
     'displacement': displacement,
-    'rhog': density_values[0]*g}  # Incredibly hacky! rho*g
+    'rhog': density_values[0]*g}
+#    'source': mom_source}  # Incredibly hacky! rho*g
 
 eta_fields = {'velocity': u_/dt,
                 'surface_id': top_id}
@@ -223,6 +246,12 @@ eta_bcs = {}
 eta_strong_bcs = [InteriorBC(W, 0., top_id)]
 stokes_solver = StokesSolver(m, T, approximation, bcs=stokes_bcs, mu=effective_viscosity, equations=ViscoElasticEquations,
                              cartesian=True, additional_fields=stokes_fields)
+
+stokes_solver.solver_parameters['ksp_view']=None
+stokes_solver.solver_parameters['fieldsplit_0']['ksp_converged_reason']=None
+stokes_solver.solver_parameters['fieldsplit_0']['ksp_monitor_true_residual']=None
+stokes_solver.solver_parameters['fieldsplit_1']['ksp_converged_reason']=None
+stokes_solver.solver_parameters['fieldsplit_1']['ksp_monitor_true_residual']=None
 
 mumps_solver_parameters = {
     'snes_monitor': None,
@@ -336,11 +365,19 @@ for timestep in range(1, max_timesteps+1):#int(max_timesteps/2)+1):
 #            output_file.write(u_, u_old, displacement, p_, previous_stress, eta_analytical)
     # Write output:
     if timestep % dump_period == 0:
-        print("timestep", timestep)
-        print("time", time.values()[0])
+        log("timestep", timestep)
+        log("time", time.values()[0])
         if OUTPUT:
             output_file.write(u_, u_old, displacement, p_, previous_stress, shear_modulus, viscosity)
 #            displacement_vom.interpolate(displacement[2])
+
+        with CheckpointFile(filename+"chk.h5", "w") as checkpoint:
+            checkpoint.save_mesh(surface_mesh)
+            checkpoint.save_function(u_, name="Incremental Displacement")
+            checkpoint.save_function(p_, name="Pressure")
+            checkpoint.save_function(displacement, name="Displacement")
+            checkpoint.save_function(deviatoric_stress, name="Deviatoric stress")
+
     displacement_vom_out(time.values()[0])
     
 #with open(filename+"_D3e6_visc1e21_shearmod1e11_nx"+str(nx)+"_dt"+str(dt_factor)+"tau_a6_refinemesh_nosurfadv_expfreesurface.txt", 'w') as file:

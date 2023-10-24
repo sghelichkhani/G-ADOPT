@@ -169,8 +169,6 @@ class StokesSolver:
         for test, eq, u in zip(self.test, self.equations, fd.split(self.solution)):
             self.F -= eq.residual(test, u, u, self.fields, bcs=self.weak_bcs)
 
-        print("equations", equations.__class__) 
-        print("self.equations", self.equations.__class__) 
         if equations==FreeSurfaceStokesEquations:
             print("hello mass term dt")
             self.F += self.equations[2].mass_term(self.test[2], (eta-eta_old)/self.dt)
