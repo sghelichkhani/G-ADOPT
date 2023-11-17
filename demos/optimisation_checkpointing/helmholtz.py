@@ -1,5 +1,8 @@
+from optimisation import OptimisationFunction, L_BFGS_BOptimizer
 from gadopt import *
 from gadopt.inverse import *
+import warnings
+warnings.filterwarnings("ignore")
 
 
 def helmholtz(V, source):
@@ -11,16 +14,6 @@ def helmholtz(V, source):
     return u
 
 
-def run(optimiser, rf, rank, filename):
-    if rank == 0:
-        with open(filename, "w") as f:
-            rf.eval_cb_post = lambda val, *args: f.write(f"{val}\n")
-            optimiser.run()
-            rf.eval_cb_pots = lambda *args: None
-    else:
-        optimiser.run()
-
-
 mesh = UnitIntervalMesh(10)
 # create a checkpointable mesh by writing to disk and restoring
 with CheckpointFile("mesh_helmholtz.h5", "w") as f:
@@ -29,18 +22,21 @@ with CheckpointFile("mesh_helmholtz.h5", "r") as f:
     mesh = f.load_mesh("firedrake_default")
 
 V = FunctionSpace(mesh, "CG", 1)
-source_ref = Function(V)
+source_ref = Function(V, name="source_ref")
 x = SpatialCoordinate(mesh)
 source_ref.interpolate(cos(pi * x**2))
 
 with stop_annotating():
     # compute reference solution
     u_ref = helmholtz(V, source_ref)
+u_ref.rename("u_ref")
 
 source = Function(V)
 c = Control(source)
 # tape the forward solution
 u = helmholtz(V, source)
+u.rename("u")
+File("input.pvd").write(u, u_ref, source)
 
 J = assemble(1e6 * (u - u_ref)**2 * dx)
 rf = ReducedFunctional(J, c)
@@ -50,23 +46,8 @@ T_ub = Function(V, name="Upper bound")
 T_lb.assign(-1.0)
 T_ub.assign(1.0)
 
-minimisation_problem = MinimizationProblem(rf, bounds=(T_lb, T_ub))
-minimisation_parameters["Status Test"]["Iteration Limit"] = 10
+stop_annotating()
 
-# run full optimisation, checkpointing every iteration
-optimiser = LinMoreOptimiser(
-    minimisation_problem,
-    minimisation_parameters,
-    checkpoint_dir="optimisation_checkpoint",
-)
-run(optimiser, rf, mesh.comm.rank, "full_optimisation.dat")
-
-# re-initialise optimiser, and restore from checkpoint
-optimiser = LinMoreOptimiser(
-    minimisation_problem,
-    minimisation_parameters,
-    checkpoint_dir="optimisation_checkpoint",
-    auto_checkpoint=False,
-)
-optimiser.restore(5)
-run(optimiser, rf, mesh.comm.rank, "restored_optimisation.dat")
+opt_f = OptimisationFunction(cntrl=c)
+optimiser = L_BFGS_BOptimizer(rf, opt_f, bounds=[(T_lb, T_ub)], m=2)
+optimiser.optimize()
