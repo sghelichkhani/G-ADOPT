@@ -3,7 +3,7 @@ from mpi4py import MPI
 import os
 import numpy as np
 OUTPUT=True
-output_directory="."
+output_directory="/data/free_surface/2d_box/viscous"
 
 def implicit_viscous_freesurface_model(nx, dt_factor):
 
@@ -112,6 +112,8 @@ def implicit_viscous_freesurface_model(nx, dt_factor):
     }
     stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs, mu=mu, cartesian=True, solver_parameters=mumps_solver_parameters, equations=FreeSurfaceStokesEquations, additional_fields=stokes_fields)
 
+    eta_midpoint =[]
+    eta_midpoint.append(eta_.at(L/2, D-0.001))
 
  # bnd_conditons is different to thwaites (it is just passed in order...)
     # analytical function
@@ -134,21 +136,27 @@ def implicit_viscous_freesurface_model(nx, dt_factor):
         local_error = assemble(pow(eta-eta_analytical,2)*ds(top_id))
         error += local_error*dt
         # Write output:
+        eta_midpoint.append(eta_.at(L/2, D-0.001))
         
         if timestep == dump_period:
             error_tau = pow(local_error,0.5)/L
 
-        #if timestep % dump_period == 0:
-        #    print("timestep", timestep)
-        #    print("time", time)
-        #    if OUTPUT:
-        #        output_file.write(u_, eta_, p_, eta_analytical)
+        if timestep % dump_period == 0:
+            print("timestep", timestep)
+            print("time", time)
+            if OUTPUT:
+                output_file.write(u_, eta_, p_, eta_analytical)
     
+    with open(filename+"_D3e6_visc1e21_impliciteta_nx"+str(nx)+"_dt"+str(dt_factor)+".txt", 'w') as file:
+        for line in eta_midpoint:
+            file.write(f"{line}\n")
+
     final_error = pow(error,0.5)/L
     return final_error #, error_tau 
 
 
-dt_factors = [4, 2, 1,0.5,0.25, 0.125]#, 0.125]#, 0.125, 0.0625, 0.03125]
+#dt_factors = [4, 2, 1,0.5,0.25, 0.125]#, 0.125]#, 0.125, 0.0625, 0.03125]
+dt_factors = [2.0,0.5]#, 0.125]#, 0.125, 0.0625, 0.03125]
 errors = np.array([implicit_viscous_freesurface_model(80, dtf) for dtf in dt_factors]) 
 conv = np.log(errors[:-1]/errors[1:])/np.log(2)
 
