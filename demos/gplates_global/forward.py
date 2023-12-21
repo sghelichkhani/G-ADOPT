@@ -47,7 +47,7 @@ def forward():
     delta_t = Constant(1.0e-9)  # Initial time step
 
     # Initialise temperature field
-    T_initialise(T, ((1.0 - (T0*exp(Di) - T0)) * (2.22-r)))
+    T_initialise(T, ((1.0 - (T0*exp(Di) - T0)) * (rmax-r)))
 
     # Top velocity boundary condition
     gplates_velocities = Function(V, name="GPlates_Velocity")
@@ -123,10 +123,13 @@ def forward():
 
     # logging diagnostic
     plog = ParameterLog('params.log', mesh)
-    plog.log_str("timestep time dt maxchange u_rms nu_top nu_base energy avg_t t_dev_avg")
+    plog.log_str("timestep time dt u_rms t_dev_avg")
 
     # number of timesteps
     num_timestep = 0
+
+    # Period for dumping solutions
+    dumping_period = 20
 
     # non-dimensionalised time for present geologic day (0)
     ndtime_now = pl_rec_model.ndtime2geotime(0.0)
@@ -141,8 +144,8 @@ def forward():
         # Update surface velocitiesvelocities
         pl_rec_model.assign_plate_velocities(time)
 
-        # # Solve Stokes sytem:
-        # stokes_solver.solve()
+        # Solve Stokes sytem:
+        stokes_solver.solve()
 
         # Adapt time step
         if num_timestep != 0:
@@ -155,27 +158,25 @@ def forward():
         if ndtime_now - time < float(dt):
             dt.assign(ndtime_now - time)
 
-        # # Temperature system:
-        # energy_solver.solve()
+        # Temperature system:
+        energy_solver.solve()
 
         # Write output:
-        if num_timestep % 1 == 0:
+        if num_timestep % dumping_period == 0:
             # compute radially averaged temperature profile
             averager.extrapolate_layer_average(T_avg, averager.get_layer_average(T))
             # compute deviation from layer average
             T_dev.assign(T-T_avg)
             paraview_file.write(u, p, T, T_dev)
             chkpoint_file.set_timestep(idx=num_timestep, time=time)
-            chkpoint_file.save_function(u, idx=num_timestep)
+            chkpoint_file.save_function(T, name="temperature", idx=num_timestep)
+            chkpoint_file.save_function(z, name="stokes", idx=num_timestep)
 
         # Log diagnostics:
-        plog.log_str(f"{num_timestep} {time} {float(dt)} {gd.u_rms()} "
-                     f"{gd.T_avg()}")
+        plog.log_str(f"{num_timestep} {time} {float(dt)} "
+                     f"{gd.u_rms()} {gd.T_avg()}")
         time += float(delta_t)
         num_timestep += 1
-
-        if num_timestep >= 7:
-            break
 
     plog.close()
 
@@ -208,7 +209,7 @@ class CheckpointFile(CheckpointFile):
 def generate_mesh():
 
     # Set up geometry:
-    ref_level, nlayers = 6, 32
+    ref_level, nlayers = 7, 64
 
     # Variable radial resolution
     # Initiating layer heights with 1.
