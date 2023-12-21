@@ -132,11 +132,11 @@ def forward():
     dumping_period = 20
 
     # non-dimensionalised time for present geologic day (0)
-    ndtime_now = pl_rec_model.ndtime2geotime(0.0)
+    ndtime_now = pl_rec_model.geotime2ndtime(0.0)
 
     # A checkpoint file for storing data
     chkpoint_file = CheckpointFile("states.h5", mode="w")
-    paraview_file = File("paraivew/output.pvd")
+    paraview_file = File("visual/output.pvd")
 
     time = 0.0
     # Now perform the time loop:
