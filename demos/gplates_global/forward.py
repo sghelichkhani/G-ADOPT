@@ -62,7 +62,6 @@ def forward():
     cpbar = Function(Q, name="IsobaricSpecificHeatCapacity").assign(1.0)
     chibar = Function(Q, name="IsothermalBulkModulus").assign(1.0)
 
-    # approximation = BoussinesqApproximation(Ra)
     approximation = TruncatedAnelasticLiquidApproximation(
         Ra, Di, rho=rhobar, Tbar=Tbar, alpha=alphabar, chi=chibar, cp=cpbar)
 
@@ -129,22 +128,27 @@ def forward():
     num_timestep = 0
 
     # Period for dumping solutions
-    dumping_period = 20
+    paraview_period = 50
+    dumping_period = 10
 
     # non-dimensionalised time for present geologic day (0)
-    ndtime_now = pl_rec_model.geotime2ndtime(0.0)
+    ndtime_now = pl_rec_model.geotime2ndtime(300.0)
 
     # A checkpoint file for storing data
     chkpoint_file = CheckpointFile("states.h5", mode="w")
     paraview_file = File("visual/output.pvd")
 
-    time = 0.0
+    # Setting time at 400.0Myrs
+    time = pl_rec_model.geotime2ndtime(400.0)
+
     # Now perform the time loop:
     while time < ndtime_now:
-        # Update surface velocitiesvelocities
-        pl_rec_model.assign_plate_velocities(time)
+        # Update surface velocities
+        pl_rec_model.assign_plate_velocities(
+            pl_rec_model.geotime2ndtime(400.0)
+        )
 
-        # Solve Stokes sytem:
+        # Solve Stokes system:
         stokes_solver.solve()
 
         # Adapt time step
@@ -162,15 +166,18 @@ def forward():
         energy_solver.solve()
 
         # Write output:
-        if num_timestep % dumping_period == 0:
+        if num_timestep % paraview_period == 0:
             # compute radially averaged temperature profile
             averager.extrapolate_layer_average(T_avg, averager.get_layer_average(T))
             # compute deviation from layer average
             T_dev.assign(T-T_avg)
             paraview_file.write(u, p, T, T_dev)
+
+        if num_timestep % dumping_period == 0:
             chkpoint_file.set_timestep(idx=num_timestep, time=time)
-            chkpoint_file.save_function(T, name="temperature", idx=num_timestep)
-            chkpoint_file.save_function(z, name="stokes", idx=num_timestep)
+            chkpoint_file.save_function(T, name="Temperature", idx=num_timestep)
+            # For large simulations the following will fail on normal PETsc
+            # chkpoint_file.save_function(z, name="Stokes", idx=num_timestep)
 
         # Log diagnostics:
         plog.log_str(f"{num_timestep} {time} {float(dt)} "
@@ -209,7 +216,7 @@ class CheckpointFile(CheckpointFile):
 def generate_mesh():
 
     # Set up geometry:
-    ref_level, nlayers = 7, 64
+    ref_level, nlayers = 7, 128
 
     # Variable radial resolution
     # Initiating layer heights with 1.
