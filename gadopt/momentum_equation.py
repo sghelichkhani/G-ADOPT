@@ -150,7 +150,9 @@ class PressureGradientTerm(BaseTerm):
         phi = test
         n = self.n
         p = fields['pressure']
-
+        if 'scale_mu' in fields:
+            p = p/ fields['scale_mu']
+        
         assert normal_is_continuous(phi)
         F = -dot(div(phi), p)*self.dx
 
@@ -160,6 +162,7 @@ class PressureGradientTerm(BaseTerm):
         for id, bc in bcs.items():
             if 'u' in bc or 'un' in bc:
                 F += dot(phi, n)*p*self.ds(id)
+        
 
         return -F
 
@@ -211,8 +214,9 @@ class PrestressAdvectionFreeSurfaceTerm(BaseTerm):
 #        displacement_current = displacement_old
         #displacement_current =  u #displacement_old  # martinec maybe...
         un = dot(displacement_current, n) * n
-        F = dot(phi, rhog * un)*self.ds(surface_id)
-    #    F -= displacement_current[1]*rhog*div(phi)*self.dx
+        F = dot(phi, rhog * un)*self.ds(surface_id)  # use this for just surface term, maybe delta rhog...11.12.23
+    #    F -= displacement_current[1]*rhog*div(phi)*self.dx  # this was already commented out on 11.12.23
+#        F = dot(phi, grad(rhog * displacement_current[2])) * self.dx  # test on 11.12.23 for basically same as having rho g as a surface term!
         return -F
 
 
