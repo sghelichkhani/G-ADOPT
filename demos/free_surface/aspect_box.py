@@ -12,7 +12,7 @@ args = parser.parse_args()
 
     
 OUTPUT=True
-output_directory="/g/data/vo05/ws9229/viscoelastic/aspect_box/"
+output_directory="/g/data/xd2/ws9229/viscoelastic/aspect_box/"
 # Set up geometry:
 dx = 5e3  # horizontal grid resolution
 L = 1500e3  # length of the domain in m
@@ -36,18 +36,19 @@ nz = 80
 dz = D / nz  # because of extrusion need to define dz after
 nz = round(D/dz)
 
-LOAD_CHECKPOINT = False
+LOAD_CHECKPOINT = True
 
-checkpoint_file = "/g/data/vo05/ws9229/viscoelastic/aspect_box/17.10.23_208cores_viscoelastic_weerdesteijn_aspectbox_dx5kmto200km_nz80scaled_a4.0_dt2years_dtout225years_Tend5years_extruded_zhongprefactor_oldFD_checkpoint/Checkpoint_State.h5"
+checkpoint_file ="/g/data/vo05/ws9229/viscoelastic/aspect_box/25.10.23_832cores_viscoelastic_weerdesteijn_aspectbox_dx5km_nz80scaled_a4_dt50years_dtout1000years_Tend110000years_extruded_zhongprefactor_oldFD_weak_TDG2interp_rho1g/chk.h5"
+
 
 if LOAD_CHECKPOINT: 
     with CheckpointFile(checkpoint_file, 'r') as afile:
         mesh = afile.load_mesh("surface_mesh_extruded")
 else:
-    surface_mesh = SquareMesh(10, 10, L)
-#    surface_mesh = Mesh("./aspect_box_refined_surface.msh", name="surface_mesh")
-#    mesh = ExtrudedMesh(surface_mesh, nz, layer_height=dz)
-    mesh = BoxMesh(10,10,10,L,L,D)
+ #   surface_mesh = SquareMesh(10, 10, L)
+    surface_mesh = Mesh("./aspect_box_refined_surface.msh", name="surface_mesh")
+    mesh = ExtrudedMesh(surface_mesh, nz, layer_height=dz)
+#    mesh = BoxMesh(10,10,10,L,L,D)
     mesh.coordinates.dat.data[:, 2] -= D
     x, y, z = SpatialCoordinate(mesh)
     # rescale vertical resolution
@@ -62,8 +63,8 @@ else:
 
 x, y, z = SpatialCoordinate(mesh)
 
-#bottom_id, top_id = "bottom", "top"  # Boundary IDs
-bottom_id, top_id = 5, 6  # Boundary IDs
+bottom_id, top_id = "bottom", "top"  # Boundary IDs
+#bottom_id, top_id = 5, 6  # Boundary IDs
 
 # Set up function spaces - currently using the bilinear Q2Q1 element pair:
 V = VectorFunctionSpace(mesh, "CG", 2)  # Displacement function space (vector)
@@ -77,8 +78,11 @@ m = Function(M)  # a field over the mixed function space M.
 # Function to store the solutions:
 if LOAD_CHECKPOINT: 
     with CheckpointFile(checkpoint_file, 'r') as afile:
-        u_ = afile.load_function(mesh, name="Incremental Displacement")
-        p_ = afile.load_function(mesh, name="Pressure")
+        u_dump = afile.load_function(mesh, name="Incremental Displacement")
+        p_dump = afile.load_function(mesh, name="Pressure")
+        u_, p_ = m.subfunctions
+        u_.assign(u_dump)
+        p_.assign(p_dump)
         displacement = afile.load_function(mesh, name="Displacement")
         deviatoric_stress = afile.load_function(mesh, name="Deviatoric stress")
 else:
@@ -131,9 +135,13 @@ maxwell_time = viscosity / shear_modulus
 
 n = FacetNormal(mesh)
 
-time = Constant(0.0)
-
 year_in_seconds = Constant(3600 * 24 * 365.25)
+
+if LOAD_CHECKPOINT:
+    time = Constant(110e3 * year_in_seconds)  # this needs to be changed!
+else:
+    time = Constant(0.0)
+
 
 short_simulation = False
 
@@ -157,7 +165,7 @@ log("max timesteps", max_timesteps)
 if short_simulation:
     dt_out = Constant(10 * year_in_seconds)
 else:
-    dt_out = Constant(1e3 * year_in_seconds)
+    dt_out = Constant(10e3 * year_in_seconds)
 
 dump_period = round(dt_out / dt)
 log("dump_period", dump_period)
@@ -213,19 +221,19 @@ u_.rename("Incremental Displacement")
 p_.rename("Pressure")
 # Create output file and select output_frequency:
 filename=os.path.join(output_directory, str(args.date))
-filename += "_viscoelastic_weerdesteijn_aspectbox_dx5km_nz"+str(nz)+"scaled_a"+str(a.values()[0])+"_dt"+str(round(dt/year_in_seconds))+"years_dtout"+str(round(dt_out.values()[0]/year_in_seconds))+"years_Tend"+str(round(Tend.values()[0]/year_in_seconds))+"years_extruded_zhongprefactor_oldFD_weakbcs_TDG2interp_coarse_strongbcs_box/"
+filename += "_viscoelastic_weerdesteijn_aspectbox_dx5km_nz"+str(nz)+"scaled_a4_dt"+str(round(dt/year_in_seconds))+"years_dtout"+str(round(dt_out.values()[0]/year_in_seconds))+"years_Tend"+str(round(Tend.values()[0]/year_in_seconds))+"years_extruded_zhongprefactor_oldFD_weak_TDG2interp_rhog_rho1_from110ka/"
 if OUTPUT:
     output_file = File(filename+"out.pvd")
 stokes_bcs = {
-    bottom_id: {'uz': 0},
+    bottom_id: {'un': 0},
 #        top_id: {'stress': -rho0 * g * (eta + dot(displacement, n)) * n},
 #        top_id: {'stress': -rho0 * g * eta * n},
     top_id: {'stress': -ice_load*n },
     #    top_id: {'old_stress': prefactor_prestress*(-rho0 * g * (eta + dot(displacement,n)) * n)},
-    1: {'ux': 0},
-    2: {'ux': 0},
-    3: {'uy': 0},
-    4: {'uy': 0},
+    1: {'un': 0},
+    2: {'un': 0},
+    3: {'un': 0},
+    4: {'un': 0},
 }
 
 mom_source = as_vector((0,0,-1))*g*(-dot(displacement, grad(density)))
@@ -235,8 +243,9 @@ stokes_fields = {
     'surface_id': top_id,  # VERY HACKY!
     'previous_stress': previous_stress,  # VERY HACKY!
     'displacement': displacement,
-    'rhog': density_values[0]*g}
-#    'source': mom_source}  # Incredibly hacky! rho*g
+    'rhog': density_values[0]*g,
+#    'rhog': (density_values[0]-conditional(time < T2_load, rho_ice*disc, 0))*g}
+    'source': mom_source}  # Incredibly hacky! rho*g
 
 eta_fields = {'velocity': u_/dt,
                 'surface_id': top_id}
@@ -247,11 +256,11 @@ eta_strong_bcs = [InteriorBC(W, 0., top_id)]
 stokes_solver = StokesSolver(m, T, approximation, bcs=stokes_bcs, mu=effective_viscosity, equations=ViscoElasticEquations,
                              cartesian=True, additional_fields=stokes_fields)
 
-stokes_solver.solver_parameters['ksp_view']=None
-stokes_solver.solver_parameters['fieldsplit_0']['ksp_converged_reason']=None
-stokes_solver.solver_parameters['fieldsplit_0']['ksp_monitor_true_residual']=None
-stokes_solver.solver_parameters['fieldsplit_1']['ksp_converged_reason']=None
-stokes_solver.solver_parameters['fieldsplit_1']['ksp_monitor_true_residual']=None
+#stokes_solver.solver_parameters['ksp_view']=None
+#stokes_solver.solver_parameters['fieldsplit_0']['ksp_converged_reason']=None
+#stokes_solver.solver_parameters['fieldsplit_0']['ksp_monitor_true_residual']=None
+#stokes_solver.solver_parameters['fieldsplit_1']['ksp_converged_reason']=None
+#stokes_solver.solver_parameters['fieldsplit_1']['ksp_monitor_true_residual']=None
 
 mumps_solver_parameters = {
     'snes_monitor': None,
@@ -372,7 +381,6 @@ for timestep in range(1, max_timesteps+1):#int(max_timesteps/2)+1):
 #            displacement_vom.interpolate(displacement[2])
 
         with CheckpointFile(filename+"chk.h5", "w") as checkpoint:
-            checkpoint.save_mesh(surface_mesh)
             checkpoint.save_function(u_, name="Incremental Displacement")
             checkpoint.save_function(p_, name="Pressure")
             checkpoint.save_function(displacement, name="Displacement")
