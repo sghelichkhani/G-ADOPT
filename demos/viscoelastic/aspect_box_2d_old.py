@@ -12,7 +12,7 @@ args = parser.parse_args()
 
     
 OUTPUT=True
-output_directory="/data/viscoelastic/2d_aspect_box/"
+output_directory="/g/data/xd2/ws9229/viscoelastic/2d_aspect_box/"
 # Set up geometry:
 dx = 5e3  # horizontal grid resolution
 L = 1500e3  # length of the domain in m
@@ -47,7 +47,7 @@ if LOAD_CHECKPOINT:
 else:
  #   surface_mesh = SquareMesh(10, 10, L)
 #    surface_mesh = Mesh("./aspect_box_refined_surface.msh", name="surface_mesh")
-    surface_mesh = UnitIntervalMesh(40, name="surface_mesh")
+    surface_mesh = IntervalMesh(150, L, name="surface_mesh")
     mesh = ExtrudedMesh(surface_mesh, nz, layer_height=dz)
 #    mesh = BoxMesh(10,10,10,L,L,D)
     mesh.coordinates.dat.data[:, 1] -= D
@@ -133,6 +133,9 @@ for i in range(0,len(density_values)-1):
                     density_values[i], density), density))
 
 
+maxwell_time = viscosity / shear_modulus
+
+n = FacetNormal(mesh)
 
 year_in_seconds = Constant(3600 * 24 * 365.25)
 
@@ -156,7 +159,6 @@ dt_elastic = Constant(dt)
 if short_simulation:
     Tend = Constant(200* year_in_seconds) # do a test of checkpointing
 else:
-#    Tend = Constant(110e3 * year_in_seconds)
     Tend = Constant(110e3 * year_in_seconds)
 
 max_timesteps = round(Tend/dt)
@@ -173,6 +175,8 @@ log("dt", dt.values()[0])
 
 scale_mu = 1e10  # this is a scaling factor roughly size of mantle maxwell time to make sure that solve converges with strong bcs in parallel...
 
+effective_viscosity = viscosity/(maxwell_time +dt/2)
+prefactor_prestress = (maxwell_time - dt/2)/(maxwell_time + dt/2)
 
 ice_load = Function(W)
 
@@ -216,7 +220,7 @@ u_.rename("Incremental Displacement")
 p_.rename("Pressure")
 # Create output file and select output_frequency:
 filename=os.path.join(output_directory, str(args.date))
-filename += "_viscoelastic_weerdesteijn_aspectbox_dx5km_nz"+str(nz)+"scaled_a4_dt"+str(round(dt/year_in_seconds))+"years_dtout"+str(round(dt_out.values()[0]/year_in_seconds))+"years_Tend"+str(round(Tend.values()[0]/year_in_seconds))+"years_extruded_zhongprefactor_oldFD_TDG2interp_strong1e10_drhorho1_from110kafixscalemu/"
+filename += "_2d_viscoelastic_weerdesteijn_aspectbox_dx5km_nz"+str(nz)+"scaled_a4_dt"+str(round(dt/year_in_seconds))+"years_dtout"+str(round(dt_out.values()[0]/year_in_seconds))+"years_Tend"+str(round(Tend.values()[0]/year_in_seconds))+"years_extruded_zhongprefactor_oldFD_TDG2interp_strong1e10_drhorho1/"
 if OUTPUT:
     output_file = File(filename+"out.pvd")
 stokes_bcs = {
