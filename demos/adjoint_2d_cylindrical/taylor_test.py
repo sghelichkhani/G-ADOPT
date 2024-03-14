@@ -107,7 +107,7 @@ def annulus_taylor_test(case):
             0.5 * (1 + tanh((1 if increasing else -1) * (r - centre) * sharpness))
         )
 
-    # From this point, we define a depth-dependent viscosity mu
+    # From this point, we define a depth-dependent viscosity mu_lin
     mu_lin = 2.0
 
     # Assemble the depth dependence
@@ -126,8 +126,10 @@ def annulus_taylor_test(case):
 
     # Assemble the viscosity expression in terms of velocity u
     eps = sym(grad(u))
-    epsii = sqrt(0.5 * inner(eps, eps))
-    sigma_y = 1e4 + 2.0e5 * (rmax - r)
+    epsii = sqrt(inner(eps, eps) + 1e-10)
+    # yield stress and its depth dependence
+    # consistent with values used in Coltice et al. 2017
+    sigma_y = 2e4 + 4e5 * (rmax - r)
     mu_plast = 0.1 + (sigma_y / epsii)
     mu_eff = 2 * (mu_lin * mu_plast) / (mu_lin + mu_plast)
     mu = conditional(mu_eff > 0.4, mu_eff, 0.4)
@@ -138,13 +140,16 @@ def annulus_taylor_test(case):
         Z, closed=False, rotational=True, translations=[0, 1]
     )
 
+    # Free-slip velocity boundary condition on all sides
     stokes_bcs = {
         "top": {"un": 0},
         "bottom": {"un": 0},
+        "top": {"un": 0},
     }
     temp_bcs = {
         "top": {"T": 0.0},
         "bottom": {"T": 1.0},
+        "top": {"T": 0.0},
     }
 
     energy_solver = EnergySolver(
