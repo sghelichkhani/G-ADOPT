@@ -4,7 +4,7 @@ import firedrake as fd
 
 from .approximations import BaseApproximation
 from .momentum_equation import StokesEquations
-from .utility import DEBUG, INFO, depends_on, ensure_constant, log_level, upward_normal
+from .utility import DEBUG, INFO, depends_on, ensure_constant, log_level, upward_normal, InteriorBC
 
 iterative_stokes_solver_parameters = {
     "mat_type": "matfree",
@@ -243,3 +243,59 @@ class StokesSolver:
         if not self._solver_setup:
             self.setup_solver()
         self.solver.solve()
+
+    def compute_force_on_surface(self, force: fd.Function, subdomain_ids):
+        """Compute force exerted on surfaces identified by subdomain_ids
+
+        Args:
+            force
+            subdomain_ids
+
+        Returns:
+            force
+        """
+        # making sure subdomain_ids is a list of ids
+        listed = isinstance(subdomain_ids, (list, tuple))
+        subdomain_ids = (subdomain_ids if listed else [subdomain_ids])
+
+        # pressure and velocity together with viscosity are needed
+        u, p, *epsilon = self.solution.subfunctions
+        mu = self.mu
+
+        # function space of the solution
+        W = force.function_space()
+        # mesh
+        mesh = W.mesh()
+        n = fd.FacetNormal(mesh)
+        # Test and Trial Functions
+        test = fd.TestFunction(W)
+        trial = fd.TrialFunction(W)
+        # Stress, compressible formulation has an additional term
+        stress = -p * fd.Identity(2) + self.mu * 2 * fd.sym(fd.grad(u))
+        compressible = self.approximation.compressible
+        if compressible:
+            stress -= 2/3 * mu * self.Identity(self.dim) * fd.div(u)
+
+        # Surface integral for extruded mesh is different
+        # Are we dealing with extruded mesh
+        extruded_mesh = mesh.extruded
+
+        # deciding on surface measure
+        a = 0
+        L = 0
+        for id in subdomain_ids:
+            if extruded_mesh:
+                if id == "top":
+                    ds = fd.ds_t
+                elif id == "bottom":
+                    ds = fd.ds_b
+            else:
+                ds = fd.ds(id)
+            L += - test * fd.dot(fd.dot(stress, n), n) * ds
+            a += test * trial * ds
+
+        # Solve a linear system
+        # solution
+        fd.solve(a == L, force, bcs=InteriorBC(W, 0., subdomain_ids))
+
+        return force
