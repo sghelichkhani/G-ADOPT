@@ -75,13 +75,7 @@ p.rename("Pressure")
 
 stokes_solver.solve()
 force = Function(W, name="force")
-stokes_solver.compute_force_on_surface(force, "top")
-
-# Taking the average out
-force_ave = assemble(force * ds_t) / assemble(1 * ds_t(mesh))
-force.assign(force - Constant(force_ave))
-interior_bc = InteriorBC(W, 0, "top")
-interior_bc.apply(force)
+stokes_solver.deviatoric_normal_stress(force, "top")
 
 # # Create output file and select output_frequency
 output_file = VTKFile("output.pvd")

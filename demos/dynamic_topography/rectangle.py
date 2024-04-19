@@ -49,8 +49,8 @@ stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs,
 # Solve Stokes sytem:
 stokes_solver.solve()
 force = Function(W, name="force")
-stokes_solver.compute_force_on_surface(force, 4)
+stokes_solver.deviatoric_normal_stress(force, 4)
 
 # Create output file and select output_frequency:
 output_file = VTKFile("output.pvd")
-output_file.write(T, force)
+output_file.write(T, force, p)
