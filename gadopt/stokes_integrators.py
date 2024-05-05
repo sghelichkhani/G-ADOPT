@@ -244,10 +244,11 @@ class StokesSolver:
             self.setup_solver()
         self.solver.solve()
 
-    def deviatoric_normal_stress(
-            self,
-            force: fd.Function,
-            subdomain_id: int | str):
+
+class dynamic_topography_solver:
+    def __init__(self,
+                 stokes_solver: StokesSolver,
+                 subdomain_id: int | str):
         """Compute deviatoric normal stress on surface(s) identified by subdomain_ids
 
         Args:
@@ -260,20 +261,19 @@ class StokesSolver:
         """
 
         # pressure and velocity together with viscosity are needed
-        u, p, *epsilon = self.solution.subfunctions
-        mu = self.mu
+        self.u = stokes_solver.u
+        self.p = stokes_solver.p
+        self.mu = stokes_solver.mu
 
         mesh = force.function_space().mesh()
         n = fd.FacetNormal(mesh)
 
         # function space of the solution
         Q = force.function_space()
-        R = fd.FunctionSpace(mesh, "R", 0)
-        W = Q * R
 
         # Test and Trial Functions
-        (phi, psi) = fd.TestFunction(W)
-        (v, lambda_) = fd.TrialFunction(W)
+        phi = fd.TestFunction(Q)
+        v = fd.TrialFunction(Q)
 
         # Stress, compressible formulation has an additional term
         stress = -p * fd.Identity(2) + mu * 2 * fd.sym(fd.grad(u))
@@ -290,16 +290,20 @@ class StokesSolver:
             ds = {"top": fd.ds_t, "bottom": fd.ds_b}.get(id)
         else:
             ds = fd.ds(id)
-        a = phi * v * ds + lambda_ * phi * ds + psi * v * ds
+        a = phi * v * ds
         L = - phi * fd.dot(fd.dot(stress, n), n) * ds
 
-        w = fd.Function(W)
+        v = fd.Function(Q)
+
+        interior_null_bc = InteriorBC(Q, 0., subdomain_id)
         # Solve a linear system
         fd.solve(
             a == L,
-            w,
-            bcs=[InteriorBC(W.sub(0), 0., subdomain_id)],
+            v,
+            bcs=interior_null_bc,
         )
-        v, lambda_ = w.subfunctions
-        force.assign(v)
+
+        vave = fd.assemble(v * ds)
+        force.assign(v - vave)
+        interior_null_bc.apply(force)
         return force
