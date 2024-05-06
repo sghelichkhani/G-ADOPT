@@ -308,6 +308,22 @@ def get_functionspace(mesh, h_family, h_degree, v_family=None, v_degree=None,
 
 
 class DiffusiveSmoothingSolver:
+    direct_stokes_solver_parameters = {
+        "snes_type": "ksponly",
+        "mat_type": "aij",
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+    }
+    # Projection solver parameters for nullspaces:
+    iterative_solver_parameters = {
+        "snes_type": "ksponly",
+        "ksp_type": "gmres",
+        "pc_type": "sor",
+        "mat_type": "aij",
+        "ksp_rtol": 1e-12,
+    }
+
     def __init__(
             self,
             function_space: fd.FunctionSpace,
@@ -371,14 +387,14 @@ class DiffusiveSmoothingSolver:
             self._setup_smoothing_solver()
 
         # TODO: make sure you change it to interpolate
-        self.rhs.assign(T)
+        self.rhs.interpolate(T)
         self.solver.solve()
 
         return self.u
 
     def _setup_smoothing_solver(self):
         """Set up the solver for diffusive smoothing."""
-
+        self._update_solver_parameters()
         trial = fd.TrialFunction(self.function_space)
         test = fd.TestFunction(self.function_space)
         dx = fd.dx(degree=self.quad_degree)
@@ -412,6 +428,14 @@ class DiffusiveSmoothingSolver:
         self.solver = fd.LinearVariationalSolver(self.problem, solver_parameters=self.solver_parameters, **self.solver_kwargs)
 
         self._solver_is_setup = True
+
+    def _update_solver_parameters(self):
+        if self.solver_parameters is None:
+            self.solver_parameters = {"snes_type": "ksponly"}
+            if self.mesh.topological_dimension() == 2:
+                self.solver_parameters.update(DiffusiveSmoothingSolver.direct_stokes_solver_parameters)
+            else:
+                self.solver_parameters.update(DiffusiveSmoothingSolver.iterative_stokes_solver_parameters)
 
 
 class LayerAveraging:
