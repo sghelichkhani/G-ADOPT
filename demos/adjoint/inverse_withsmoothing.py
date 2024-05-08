@@ -10,13 +10,21 @@ from gadopt.inverse import *
 
 ds_t = ds_t(degree=6)
 dx = dx(degree=6)
+total_number_of_iterations = 0
 
 
 def main():
     inverse(alpha_u=1e-1, wavelength=0.1)
 
 
-def inverse(alpha_u, wavelength):
+def step_wise_inverse(smoothing_weights, number_of_iterations):
+    smoothing_weights = smoothing_weights # [1.0, 0.5, 0.3, 0.1, 0.01]
+    number_of_iterations = number_of_iterations # [15, 15, 15, 30, 50]
+    for lambda_, iter_num in zip(smoothing_weights, number_of_iterations):
+        inverse(alpha_u=1e-2, wavelength=lambda_, iteration_numbers=iter_num)
+
+
+def inverse(alpha_u, wavelength, iteration_numbers):
     """
     Use adjoint-based optimisation to solve for the initial condition of the rectangular
     problem.
@@ -30,6 +38,7 @@ def inverse(alpha_u, wavelength):
     # the adjoint reflects the forward problem we solve here
     tape = get_working_tape()
     tape.clear_tape()
+    total_number_of_iterations += iteration_numbers
 
     script_dir = Path(__file__).parent
     mesh_path = script_dir / "mesh.h5"
@@ -178,10 +187,14 @@ def inverse(alpha_u, wavelength):
     T_ub.assign(1.0)
 
     minimisation_problem = MinimizationProblem(reduced_functional, bounds=(T_lb, T_ub))
+    minimisation_parameters["Status Test"]["Iteration Limit"] = total_number_of_iterations
+    minimisation_parameters["General"]["Secant"]["Maximum Storage"] = 5
 
     optimiser = LinMoreOptimiser(
         minimisation_problem,
         minimisation_parameters,
+        checkpoint_dir="checkpoints",
+        auto_checkpoint=True,
     )
     optimiser.add_callback(callback)
     optimiser.run()
@@ -190,6 +203,10 @@ def inverse(alpha_u, wavelength):
     # to ensure the annotations are switched back on for the next code
     # to use them
     continue_annotation()
+
+
+def set_minimisation_parameters(restore_from, num_iterations):
+    return minimisation_parameters
 
 
 if __name__ == "__main__":
