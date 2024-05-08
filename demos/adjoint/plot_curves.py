@@ -28,7 +28,7 @@ def obtain_callback_outputs(path_to_file):
 
 
 base_path = Path(".")
-all_files = base_path.rglob("job_WEIGHTU_0.1_WAVELENGTH_*/output.log")
+all_files = base_path.rglob("job_WEIGHTU_1.0_WAVELENGTH_*/output.log")
 
 all_outputs = {}
 for file_name in list(all_files):
