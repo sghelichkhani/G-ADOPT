@@ -33,6 +33,7 @@ def inverse(alpha_u, wavelength):
 
     script_dir = Path(__file__).parent
     mesh_path = script_dir / "mesh.h5"
+    checkpoint_path = script_dir / "Checkpoint_State.h5"
     with CheckpointFile(mesh_path.as_posix(), "r") as f:
         mesh = f.load_mesh("firedrake_default_extruded")
 
@@ -65,7 +66,7 @@ def inverse(alpha_u, wavelength):
     Tic = Function(Q1, name="Initial Temperature")
     Taverage = Function(Q1, name="Average Temperature")
 
-    checkpoint_file = CheckpointFile("Checkpoint_State.h5", "r")
+    checkpoint_file = CheckpointFile(checkpoint_path.as_posix(), "r")
     # Initialise the control
     Tic.project(
         checkpoint_file.load_function(mesh, "Temperature", idx=max_timesteps - 1)
@@ -115,7 +116,7 @@ def inverse(alpha_u, wavelength):
     # and impose the boundary conditions at the same time
     # Additionaly, we want to impose some measure of smoothness
     # for our solution. We do so by operating a diffusion equation
-    smoother = DiffusiveSmoothingSolver(function_space=Q, wavelength=0.05, bcs=temp_bcs)
+    smoother = DiffusiveSmoothingSolver(function_space=Q, wavelength=wavelength, bcs=temp_bcs)
     T.assign(smoother.action(Tic))
 
     # Populate the tape by running the forward simulation
