@@ -16,11 +16,11 @@ def main():
     inverse(alpha_u=1e-1, wavelength=0.1)
 
 
-def stepwise_inverse(smoothing_weights, number_of_iterations, gnorm):
+def stepwise_inverse(smoothing_weights, number_of_iterations, gnorms):
     # smoothing_weights = smoothing_weights  # [1.0, 0.5, 0.3, 0.1, 0.01]
     # number_of_iterations = number_of_iterations  # [15, 15, 15, 30, 50]
     total_number_of_iterations = 0
-    for lambda_, iter_num, input_gnorm in zip(smoothing_weights, number_of_iterations, gnorm):
+    for lambda_, iter_num, input_gnorm in zip(smoothing_weights, number_of_iterations, gnorms):
         total_number_of_iterations += iter_num
         inverse(alpha_u=1e-2, wavelength=lambda_, iteration_numbers=iter_num, total_number_of_iterations=total_number_of_iterations, input_gnorm=input_gnorm)
 
