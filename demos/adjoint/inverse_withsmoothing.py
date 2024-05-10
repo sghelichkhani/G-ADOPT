@@ -10,21 +10,22 @@ from gadopt.inverse import *
 
 ds_t = ds_t(degree=6)
 dx = dx(degree=6)
-total_number_of_iterations = 0
 
 
 def main():
     inverse(alpha_u=1e-1, wavelength=0.1)
 
 
-def step_wise_inverse(smoothing_weights, number_of_iterations):
-    smoothing_weights = smoothing_weights # [1.0, 0.5, 0.3, 0.1, 0.01]
-    number_of_iterations = number_of_iterations # [15, 15, 15, 30, 50]
-    for lambda_, iter_num in zip(smoothing_weights, number_of_iterations):
-        inverse(alpha_u=1e-2, wavelength=lambda_, iteration_numbers=iter_num)
+def stepwise_inverse(smoothing_weights, number_of_iterations, gnorm):
+    # smoothing_weights = smoothing_weights  # [1.0, 0.5, 0.3, 0.1, 0.01]
+    # number_of_iterations = number_of_iterations  # [15, 15, 15, 30, 50]
+    total_number_of_iterations = 0
+    for lambda_, iter_num, input_gnorm in zip(smoothing_weights, number_of_iterations, gnorm):
+        total_number_of_iterations += iter_num
+        inverse(alpha_u=1e-2, wavelength=lambda_, iteration_numbers=iter_num, total_number_of_iterations=total_number_of_iterations, input_gnorm=input_gnorm)
 
 
-def inverse(alpha_u, wavelength, iteration_numbers):
+def inverse(alpha_u, wavelength, iteration_numbers, total_number_of_iterations, input_gnorm):
     """
     Use adjoint-based optimisation to solve for the initial condition of the rectangular
     problem.
@@ -33,12 +34,10 @@ def inverse(alpha_u, wavelength, iteration_numbers):
         alpha_u: The coefficient of the velocity misfit term
         wavelength: wavelength with which we can filter
     """
-
     # Clear the tape of any previous operations to ensure
     # the adjoint reflects the forward problem we solve here
     tape = get_working_tape()
     tape.clear_tape()
-    total_number_of_iterations += iteration_numbers
 
     script_dir = Path(__file__).parent
     mesh_path = script_dir / "mesh.h5"
@@ -48,7 +47,7 @@ def inverse(alpha_u, wavelength, iteration_numbers):
 
     bottom_id, top_id, left_id, right_id = "bottom", "top", 1, 2
 
-    enable_disk_checkpointing()
+    enable_disk_checkpointing(cleanup=False)
 
     # Set up function spaces for the Q2Q1 pair
     V = VectorFunctionSpace(mesh, "CG", 2)  # Velocity function space (vector)
@@ -129,7 +128,7 @@ def inverse(alpha_u, wavelength, iteration_numbers):
     T.assign(smoother.action(Tic))
 
     # Populate the tape by running the forward simulation
-    for timestep in range(0, max_timesteps):
+    for timestep in range(max_timesteps - 2, max_timesteps):
         stokes_solver.solve()
         energy_solver.solve()
 
@@ -169,15 +168,24 @@ def inverse(alpha_u, wavelength, iteration_numbers):
     # Defining the object for pyadjoint
     reduced_functional = ReducedFunctional(objective, control)
 
-    def callback():
-        initial_misfit = assemble(
-            (Tic.block_variable.checkpoint.restore() - Tic_ref) ** 2 * dx
-        )
-        final_misfit = assemble(
-            (T.block_variable.checkpoint.restore() - Tobs) ** 2 * dx
-        )
+    class CallbackClass:
+        def __init__(self):
+            self.T_ic_rec = Function(Tic.function_space())
+            self.T_ref_rec = Function(T.function_space())
 
-        log(f"Initial misfit; {initial_misfit}; final misfit: {final_misfit}")
+        def __call__(self):
+            self.T_ic_rec.interpolate(Tic.block_variable.checkpoint.restore() - Tic_ref)
+            initial_misfit = assemble(self.T_ic_rec ** 2 * dx)
+
+            self.T_ref_rec.assign(T.block_variable.checkpoint.restore() - Tobs)
+            final_misfit = assemble(self.T_ref_rec ** 2 * dx)
+            log(f"Initial misfit; {initial_misfit}; final misfit: {final_misfit}")
+
+            self.T_ic_rec.interpolate(smoother.action(self.T_ic_rec))
+            self.T_ref_rec.interpolate(smoother.action(self.T_ref_rec))
+            initial_misfit = assemble(self.T_ic_rec ** 2 * dx)
+            final_misfit = assemble(self.T_ref_rec ** 2 * dx)
+            log(f"Smooth Initial misfit; {initial_misfit}; Smooth final misfit: {final_misfit}")
 
     # Perform a bounded nonlinear optimisation where temperature
     # is only permitted to lie in the range [0, 1]
@@ -188,7 +196,9 @@ def inverse(alpha_u, wavelength, iteration_numbers):
 
     minimisation_problem = MinimizationProblem(reduced_functional, bounds=(T_lb, T_ub))
     minimisation_parameters["Status Test"]["Iteration Limit"] = total_number_of_iterations
-    minimisation_parameters["General"]["Secant"]["Maximum Storage"] = 5
+    minimisation_parameters["General"]["Secant"]["Maximum Storage"] = 10
+    minimisation_parameters["Step"]["Trust Region"]["Initial Radius"] = 0.1
+    minimisation_parameters["Status Test"]["Gradient Tolerance"] = input_gnorm
 
     optimiser = LinMoreOptimiser(
         minimisation_problem,
@@ -196,7 +206,11 @@ def inverse(alpha_u, wavelength, iteration_numbers):
         checkpoint_dir="checkpoints",
         auto_checkpoint=True,
     )
-    optimiser.add_callback(callback)
+    optimiser.add_callback(CallbackClass())
+    if total_number_of_iterations != iteration_numbers:
+        # print(total_number_of_iterations - iteration_numbers)
+        # optimiser.restore(total_number_of_iterations-iteration_numbers)
+        optimiser.restore()
     optimiser.run()
 
     # If we're performing mulitple successive optimisations, we want
