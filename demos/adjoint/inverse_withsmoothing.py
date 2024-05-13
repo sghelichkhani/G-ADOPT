@@ -40,10 +40,17 @@ def inverse(alpha_u, wavelength, iteration_numbers, total_number_of_iterations, 
     tape.clear_tape()
 
     script_dir = Path(__file__).parent
-    mesh_path = script_dir / "mesh.h5"
+    my_iteration = find_iteration(script_dir)
     checkpoint_path = script_dir / "Checkpoint_State.h5"
-    with CheckpointFile(mesh_path.as_posix(), "r") as f:
-        mesh = f.load_mesh("firedrake_default_extruded")
+
+    if my_iteration == 0:
+        mesh_path = script_dir / "mesh.h5"
+        with CheckpointFile(mesh_path.as_posix(), "r") as f:
+            mesh = f.load_mesh("firedrake_default_extruded")
+    else:
+        mesh_path = script_dir / f"solution_{my_iteration:03d}.h5"
+        with CheckpointFile(mesh_path.as_posix(), "r") as f:
+            mesh = f.load_mesh("firedrake_default_extruded")
 
     bottom_id, top_id, left_id, right_id = "bottom", "top", 1, 2
 
@@ -72,14 +79,17 @@ def inverse(alpha_u, wavelength, iteration_numbers, total_number_of_iterations, 
     # Without a restart to continue from, our initial guess is the final state of the forward run
     # We need to project the state from Q2 into Q1
     Tic = Function(Q1, name="Initial Temperature")
-    Taverage = Function(Q1, name="Average Temperature")
 
     checkpoint_file = CheckpointFile(checkpoint_path.as_posix(), "r")
-    # Initialise the control
-    Tic.project(
-        checkpoint_file.load_function(mesh, "Temperature", idx=max_timesteps - 1)
-    )
-    Taverage.project(checkpoint_file.load_function(mesh, "Average Temperature", idx=0))
+
+    if my_iteration == 0:
+        Tic.project(checkpoint_file.load_function(mesh, "Temperature", idx=max_timesteps - 1))
+    else:
+        with CheckpointFile(mesh_path.as_posix(), mode="r") as fi:
+            # Initialise the control
+            Tic.project(
+                checkpoint_file.load_function(mesh, f"solution_{my_iteration:03d}")
+            )
 
     # Temperature function in Q2, where we solve the equations
     T = Function(Q, name="Temperature")
@@ -145,9 +155,6 @@ def inverse(alpha_u, wavelength, iteration_numbers, total_number_of_iterations, 
     Tic_ref = checkpoint_file.load_function(mesh, "Temperature", idx=0)
     Tic_ref.rename("Reference Initial Temperature")
 
-    # Load the average temperature profile
-    Taverage = checkpoint_file.load_function(mesh, "Average Temperature", idx=0)
-
     checkpoint_file.close()
 
     # Define the component terms of the overall objective functional
@@ -169,11 +176,16 @@ def inverse(alpha_u, wavelength, iteration_numbers, total_number_of_iterations, 
     reduced_functional = ReducedFunctional(objective, control)
 
     class CallbackClass:
-        def __init__(self):
+        def __init__(self, iteration):
             self.T_ic_rec = Function(Tic.function_space())
             self.T_ref_rec = Function(T.function_space())
+            self.iteration = iteration
 
         def __call__(self):
+            with CheckpointFile(f"solution_{self.iteration:03d}.h5", mode="w") as fi:
+                fi.save_mesh(mesh)
+                fi.save_function(Tic.block_variable.checkpoint.restore(), name=f"solution_{self.iteration:03d}")
+
             self.T_ic_rec.interpolate(Tic.block_variable.checkpoint.restore() - Tic_ref)
             initial_misfit = assemble(self.T_ic_rec ** 2 * dx)
 
@@ -203,14 +215,14 @@ def inverse(alpha_u, wavelength, iteration_numbers, total_number_of_iterations, 
     optimiser = LinMoreOptimiser(
         minimisation_problem,
         minimisation_parameters,
-        checkpoint_dir="checkpoints",
-        auto_checkpoint=True,
+        # checkpoint_dir="checkpoints",
+        auto_checkpoint=False,
     )
-    optimiser.add_callback(CallbackClass())
-    if total_number_of_iterations != iteration_numbers:
-        # print(total_number_of_iterations - iteration_numbers)
-        # optimiser.restore(total_number_of_iterations-iteration_numbers)
-        optimiser.restore()
+    optimiser.add_callback(CallbackClass(iteration=my_iteration))
+    # if total_number_of_iterations != iteration_numbers:
+    #     # print(total_number_of_iterations - iteration_numbers)
+    #     # optimiser.restore(total_number_of_iterations-iteration_numbers)
+    #     optimiser.restore()
     optimiser.run()
 
     # If we're performing mulitple successive optimisations, we want
@@ -221,6 +233,18 @@ def inverse(alpha_u, wavelength, iteration_numbers, total_number_of_iterations, 
 
 def set_minimisation_parameters(restore_from, num_iterations):
     return minimisation_parameters
+
+
+def find_iteration(main_path):
+    main_path = Path(main_path)
+    all_files = list(main_path.glob(pattern="solution*.h5"))
+
+    if len(all_files) == 0:
+        iteration = 0
+    else:
+        iteration = sorted([int(fi.as_posix().split("/")[-1].split("_")[-1].split(".")[0]) for fi in all_files])[-1]
+
+    return iteration
 
 
 if __name__ == "__main__":
