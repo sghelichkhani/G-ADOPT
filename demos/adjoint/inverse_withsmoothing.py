@@ -138,7 +138,7 @@ def inverse(alpha_u, wavelength, iteration_numbers, total_number_of_iterations, 
     T.assign(smoother.action(Tic))
 
     # Populate the tape by running the forward simulation
-    for timestep in range(max_timesteps - 2, max_timesteps):
+    for timestep in range(0, max_timesteps):
         stokes_solver.solve()
         energy_solver.solve()
 
