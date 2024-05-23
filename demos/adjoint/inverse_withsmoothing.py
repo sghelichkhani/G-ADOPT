@@ -185,6 +185,8 @@ def inverse(alpha_u, wavelength, iteration_numbers, total_number_of_iterations, 
             with CheckpointFile(f"solution_{self.iteration:03d}.h5", mode="w") as fi:
                 fi.save_mesh(mesh)
                 fi.save_function(Tic.block_variable.checkpoint.restore(), name=f"solution_{self.iteration:03d}")
+            
+            self.iteration += 1
 
             self.T_ic_rec.interpolate(Tic.block_variable.checkpoint.restore() - Tic_ref)
             initial_misfit = assemble(self.T_ic_rec ** 2 * dx)
