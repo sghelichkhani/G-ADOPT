@@ -17,10 +17,21 @@ def obtain_rol_outputs(path_to_file):
     return np.asarray(rol_outputs)
 
 
+def obtain_callback_outputs_smooth(path_to_file):
+    with open(file=path_to_file, mode="r") as fi:
+        lines = fi.readlines()
+    lines = [line.replace(";", "") for line in lines]
+    flgs = ["Smooth Initial misfit" in line for line in lines]
+    initial_misfits = np.asarray([line.strip().split()[3] for line in np.asarray(lines)[flgs]]).astype("float")
+    final_misfits = np.asarray([line.strip().split()[7] for line in np.asarray(lines)[flgs]]).astype("float")
+    return initial_misfits, final_misfits
+
+
 def obtain_callback_outputs(path_to_file):
     with open(file=path_to_file, mode="r") as fi:
         lines = fi.readlines()
     lines = [line.replace(";", "") for line in lines]
+    lines = [line.replace("Smooth Initial misfit", "Smooth Nonsense") for line in lines]
     flgs = ["Initial misfit" in line for line in lines]
     initial_misfits = np.asarray([line.strip().split()[2] for line in np.asarray(lines)[flgs]]).astype("float")
     final_misfits = np.asarray([line.strip().split()[5] for line in np.asarray(lines)[flgs]]).astype("float")
@@ -28,12 +39,13 @@ def obtain_callback_outputs(path_to_file):
 
 
 base_path = Path(".")
-all_files = base_path.rglob("job_WEIGHTU_1.0_WAVELENGTH_*/output.log")
+all_files = base_path.rglob("job_step_wise_*/*log")
 
 all_outputs = {}
 for file_name in list(all_files):
+    print(file_name)
     rol_output = obtain_rol_outputs(file_name)
-    init_misfit, final_misfit = obtain_callback_outputs(path_to_file=file_name)
+    init_misfit, final_misfit = obtain_callback_outputs_smooth(path_to_file=file_name)
     all_outputs[file_name.parts[0]] = {"rol": rol_output, "init_misfit": init_misfit, "final_misfit": final_misfit}
 
 
