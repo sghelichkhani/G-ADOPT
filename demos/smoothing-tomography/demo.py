@@ -9,7 +9,8 @@ This script demonstrates the application of isotropic and anisotropic diffusive 
 from gadopt import *
 from pathlib import Path
 
-input_finame = Path(__file__).parents[1] / "adjoint_2d_cylindrical/Checkpoint230.h5"
+# input_finame = Path(__file__).parents[1] / "adjoint_2d_cylindrical/Checkpoint230.h5"
+input_finame = Path(__file__).resolve().parent / "final_state.h5"
 
 # Load a cylindrical temperature field from a checkpoint file
 with CheckpointFile(str(input_finame), mode="r") as f:
