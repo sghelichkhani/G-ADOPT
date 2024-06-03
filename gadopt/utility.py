@@ -26,15 +26,27 @@ def log(*args):
 
 
 class ParameterLog:
-    def __init__(self, filename, mesh):
+    def __init__(self, filename, mesh, echo_interval=None):
         self.comm = mesh.comm
+        self.line_count = 0
+        self.echo_interval = echo_interval
+
         if self.comm.rank == 0:
             self.f = open(filename, 'w')
 
-    def log_str(self, str):
+    def log_str(self, str, echo=False):
+        self.line_count += 1
+        if self.echo_interval:
+            self.line_count %= self.echo_interval
+        if echo:
+            self.line_count = 0
+
         if self.comm.rank == 0:
             self.f.write(str + "\n")
             self.f.flush()
+
+            if self.line_count == 0:
+                print(str)
 
     def close(self):
         if self.comm.rank == 0:
