@@ -2,9 +2,6 @@ from gadopt import *
 import numpy
 import assess
 
-# Quadrature degree:
-_dx = dx(degree=6)
-
 # Projection solver parameters for nullspaces:
 _project_solver_parameters = {
     "snes_type": "ksponly",
@@ -16,7 +13,7 @@ _project_solver_parameters = {
 
 
 def model(level, nn, do_write=False):
-    """The delta-function initial condition, cylindrical domain, zero-slip boundary condition model.
+    """The discontinuous pressure delta-function initial condition, cylindrical domain, zero-slip boundary condition model.
 
     Args:
         level: refinement level
@@ -43,7 +40,7 @@ def model(level, nn, do_write=False):
 
     # Set up function spaces - currently using the P2P1 element pair :
     V = VectorFunctionSpace(mesh, "CG", 2)  # velocity function space (vector)
-    W = FunctionSpace(mesh, "CG", 1)  # pressure function space (scalar)
+    W = FunctionSpace(mesh, "DPC", 1)  # pressure function space (scalar)
     P0 = FunctionSpace(mesh, "DQ", 0)  # used for marker field
     Q1DG = FunctionSpace(mesh, "DQ", 1)  # used for analytical (disc.) pressure solution
     Q1DGvec = VectorFunctionSpace(mesh, "DQ", 1)  # for coordinates used in analytical pressure solution
@@ -95,11 +92,11 @@ def model(level, nn, do_write=False):
     # take out null modes through L2 projection from velocity and pressure
     # removing rotation from velocity:
     rot = as_vector((-X[1], X[0]))
-    coef = assemble(dot(rot, u_)*_dx) / assemble(dot(rot, rot)*_dx)
+    coef = assemble(dot(rot, u_)*dx) / assemble(dot(rot, rot)*dx)
     u_.project(u_ - rot*coef, solver_parameters=_project_solver_parameters)
 
     # removing constant nullspace from pressure
-    coef = assemble(p_ * _dx)/assemble(Constant(1.0)*_dx(domain=mesh))
+    coef = assemble(p_ * dx)/assemble(Constant(1.0)*dx(domain=mesh))
     p_.project(p_ - coef, solver_parameters=_project_solver_parameters)
 
     solution_upper = assess.CylindricalStokesSolutionDeltaZeroSlip(float(nn), +1, nu=float(mu))
@@ -137,9 +134,9 @@ def model(level, nn, do_write=False):
         u_file.write(u_, u_anal, u_error)
         p_file.write(p_, p_anal, p_error)
 
-    l2anal_u = numpy.sqrt(assemble(dot(u_anal, u_anal)*_dx))
-    l2anal_p = numpy.sqrt(assemble(dot(p_anal, p_anal)*_dx))
-    l2error_u = numpy.sqrt(assemble(dot(u_error, u_error)*_dx))
-    l2error_p = numpy.sqrt(assemble(dot(p_error, p_error)*_dx))
+    l2anal_u = numpy.sqrt(assemble(dot(u_anal, u_anal)*dx))
+    l2anal_p = numpy.sqrt(assemble(dot(p_anal, p_anal)*dx))
+    l2error_u = numpy.sqrt(assemble(dot(u_error, u_error)*dx))
+    l2error_p = numpy.sqrt(assemble(dot(p_error, p_error)*dx))
 
     return l2error_u, l2error_p, l2anal_u, l2anal_p
