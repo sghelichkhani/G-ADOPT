@@ -32,6 +32,7 @@ Z_nullspace = create_stokes_nullspace(Z, closed=True, rotational=False)
 # and define mu which will be passed on to StokesSolver
 
 mu_power = Function(W, name="mu power").interpolate(-2*exp(-(X[1] - 0.8)**2/0.005))
+mu = Function(W, name="mu")
 mu.interpolate(10 ** mu_power)
 
 # +
