@@ -1,3 +1,7 @@
+# This is the forward code for generating the synthetic test
+# In this example using the example from the base case, we want
+# to generate a synthetic field at Ear
+
 from gadopt import *
 
 nx, ny = 40, 40  # Number of cells in x and y directions.

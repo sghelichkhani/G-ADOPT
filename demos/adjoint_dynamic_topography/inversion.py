@@ -1,4 +1,3 @@
-import numpy as np
 from gadopt import *
 from gadopt.inverse import *
 
@@ -23,7 +22,7 @@ z.subfunctions[1].rename("Pressure")
 
 # +
 Ra = Constant(1e4)  # Rayleigh number
-mu_control = Function(W, name="control").assign(1.0)
+mu_control = Function(W, name="control").assign(0.0)
 control = Control(mu_control)
 
 kx = 1.0  # Conductivity in the x direction
@@ -36,9 +35,9 @@ ey = as_vector((0, 1))  # Unit vector in the y direction
 
 K = kx * outer(ex, ex) + ky * outer(ey, ey)
 
-smoother = DiffusiveSmoothingSolver(function_space=W, wavelength=1.0, K=K, bcs={top_id: {"T": 1.0}})
+smoother = DiffusiveSmoothingSolver(function_space=W, wavelength=1.0, K=K)
 mu = Function(W, name="viscosity")
-mu.project(10 ** (ln(smoother.action(mu_control))/ln(10)))
+mu.project(10 ** smoother.action(mu_control))
 approximation = BoussinesqApproximation(Ra)
 
 X = SpatialCoordinate(mesh)
@@ -78,15 +77,39 @@ objective = assemble(0.5 * (surface_force - residual_topography) ** 2 * ds(top_i
 
 # Defining the reduced functional
 reduced_functional = ReducedFunctional(objective, controls=control)
-der_func = reduced_functional.derivative(options={"riesz_representation": "L2"})
-der_func.rename("derivative")
 
-# Visualising the derivative
-VTKFile("inverse-visualisation.pvd").write(*z.subfunctions, T, surface_force, der_func)
 
-# Performing taylor test
-Delta_mu = Function(mu.function_space(), name="Delta_Temperature")
-Delta_mu.dat.data[:] = np.random.random(Delta_mu.dat.data.shape)
+# Callback function for writing out the solution's visualisation
+solution_pvd = VTKFile("solutions.pvd")
 
-# Perform the Taylor test to verify the gradients
-minconv = taylor_test(reduced_functional, mu, Delta_mu)
+
+def callback():
+    solution_pvd.write(mu_control.block_variable.checkpoint)
+
+
+# Perform a bounded nonlinear optimisation where temperature
+# is only permitted to lie in the range [0, 1]
+mu_lb = Function(mu_control.function_space(), name="Lower bound temperature")
+mu_ub = Function(mu_control.function_space(), name="Upper bound temperature")
+mu_lb.assign(-2.0)
+mu_ub.assign(2.0)
+
+minimisation_problem = MinimizationProblem(reduced_functional, bounds=(mu_lb, mu_ub))
+
+# Adjust minimisation parameters
+minimisation_parameters["Status Test"]["Iteration Limit"] = 2
+
+optimiser = LinMoreOptimiser(
+    minimisation_problem,
+    minimisation_parameters,
+)
+optimiser.add_callback(callback)
+optimiser.run()
+
+
+optimiser.rol_solver.rolvector.dat[0].rename("Final Solution")
+with CheckpointFile("final_solution.h5", mode="w") as fi:
+    fi.save_mesh(mesh)
+    fi.save_function(optimiser.rol_solver.rolvector.dat[0])
+
+VTKFile("final_solution.pvd").write(optimiser.rol_solver.rolvector.dat[0])
