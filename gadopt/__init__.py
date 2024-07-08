@@ -23,6 +23,7 @@ from .scalar_equation import EnergyEquation
 from .stokes_integrators import BoundaryNormalStressSolver, StokesSolver, create_stokes_nullspace
 from .time_stepper import CrankNicolsonRK, ImplicitMidpoint, eSSPRKs3p3, eSSPRKs10p3
 from .utility import (
+    DiffusiveSmoothingSolver,
     LayerAveraging,
     ParameterLog,
     TimestepAdaptor,

@@ -5,6 +5,7 @@ from firedrake import as_vector, SpatialCoordinate, Constant, max_value, min_val
 from firedrake import op2, VectorElement, DirichletBC, utils
 from firedrake.__future__ import Interpolator
 from firedrake.ufl_expr import extract_unique_domain
+import firedrake as fd
 import ufl
 import finat.ufl
 import time
@@ -312,10 +313,10 @@ class DiffusiveSmoothingSolver:
             self,
             function_space: fd.FunctionSpace,
             wavelength: Number,
-            bcs: Optional[dict[int, dict[str, int | float]]] = None,
+            bcs: Optional[dict[int, dict[str, int | float]]] = {},
             K: fd.Function | Number = 1,
             quad_degree: int = 6,
-            solver_parameters: Optional[dict[str, str | float]] = None,
+            solver_parameters: Optional[dict[str, str | float]] = {},
             **kwargs):
         """A class to perform diffusive smoothing using a diffusion solver.
 
@@ -397,6 +398,7 @@ class DiffusiveSmoothingSolver:
             else:
                 return fd.ds(subdomain_id)
         bcs = []
+
         # for boundary conditions set, we have flux at the boundaries
         for subdomain_id, bc in self.bcs.items():
             for bc_type, value in bc.items():
