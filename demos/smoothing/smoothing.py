@@ -21,6 +21,7 @@ temp_bcs = {
 
 # Compute layer average of the temperature for initial comparison
 # This helps to visualize changes pre and post smoothing
+T_dev = Function(T.function_space(), name='DeviatoriocTemperature')
 T_avg = Function(T.function_space(), name='Layer_Averaged_Temp')
 averager = LayerAveraging(mesh, cartesian=False, quad_degree=6)
 averager.extrapolate_layer_average(T_avg, averager.get_layer_average(T))
@@ -36,7 +37,7 @@ smoother_isotropic = DiffusiveSmoothingSolver(
     bcs=temp_bcs)
 
 smooth_solution_isotropic.assign(smoother_isotropic.action(T))
-VTKFile("isotropic_smoothing.pvd").write(T.assign(T - T_avg), smooth_solution_isotropic.assign(smooth_solution_isotropic - T_avg))
+VTKFile("isotropic_smoothing.pvd").write(T_dev.assign(T - T_avg), smooth_solution_isotropic.assign(smooth_solution_isotropic - T_avg))
 
 # Anisotropic Smoothing
 # ---------------------
@@ -57,13 +58,14 @@ et = as_vector((-X[1]/r, X[0]/r))  # Unit tangential vector
 # K = kr * outer(er, er) + kt * outer(et, et) defines how the diffusion behaves differently in radial and tangential directions.
 K = kr * outer(er, er) + kt * outer(et, et)
 
+smooth_solution_anisotropic = Function(T.function_space(), name="Smooth Temperature - Anisotropic")
 smoother_anisotropic = DiffusiveSmoothingSolver(
     function_space=T.function_space(),
-    wavelength=0.1,
+    wavelength=0.4,
     bcs=temp_bcs,
     K=K)
 
 smooth_solution_anisotropic.assign(smoother_anisotropic.action(T))
-VTKFile("anisotropic_smoothing.pvd").write(T.assign(T - T_avg), smooth_solution_anisotropic.assign(smooth_solution_anisotropic - T_avg))
+VTKFile("anisotropic_smoothing.pvd").write(T_dev, smooth_solution_anisotropic.assign(smooth_solution_anisotropic - T_avg))
 
 # Visualization is handled by external software that can read .pvd files, such as Paraview.
