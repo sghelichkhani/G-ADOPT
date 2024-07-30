@@ -6,6 +6,7 @@ left_id, right_id, bottom_id, top_id = 1, 2, 3, 4  # Boundary IDs
 
 with CheckpointFile("checkpoint.h5", mode="r") as fi:
     mesh = fi.load_mesh(name="firedrake_default")
+    mesh.cartesian = True
     residual_topography = fi.load_function(mesh, f"force_{top_id}")
 
 
