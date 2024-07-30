@@ -61,7 +61,7 @@ temp_bcs = {
 
 stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs, mu=mu,
                              nullspace=Z_nullspace, transpose_nullspace=Z_nullspace,
-                             cartesian=True)
+                             )
 
 surface_force_solver = BoundaryNormalStressSolver(stokes_solver, top_id)
 

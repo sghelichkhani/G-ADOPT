@@ -8,6 +8,7 @@ from gadopt import *
 
 nx, ny = 40, 40  # Number of cells in x and y directions.
 mesh = UnitSquareMesh(nx, ny, quadrilateral=True)  # Square mesh generated via firedrake
+mesh.cartesian = True
 X = SpatialCoordinate(mesh)  # Spatial coordinates x = X[0], y = X[1]
 left_id, right_id, bottom_id, top_id = 1, 2, 3, 4  # Boundary IDs
 
@@ -50,7 +51,7 @@ temp_bcs = {
 
 stokes_solver = StokesSolver(z, T, approximation, bcs=stokes_bcs, mu=mu,
                              nullspace=Z_nullspace, transpose_nullspace=Z_nullspace,
-                             cartesian=True, constant_jacobian=True)
+                             constant_jacobian=True)
 
 surface_force_solver = BoundaryNormalStressSolver(stokes_solver, top_id)
 
