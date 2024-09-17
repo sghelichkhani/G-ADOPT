@@ -60,6 +60,10 @@ jobs:
           echo "${S3CONFIG}" > $HOME/.s3cfg/config
           chmod 600 $HOME/.s3cfg/config
 
+      - name: Determine Python version
+        id: python-version
+        run: echo "PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
           lfs: true
@@ -75,34 +79,45 @@ jobs:
           ACTIONS_CACHE_URL: ${{ secrets.ACTIONS_CACHE_URL }}
         with:
           path: |
-            pygplates_0.36.0_py312_amd64.deb
+            pygplates_0.36.0_py${{ steps.python-version.outputs.PYTHON_VERSION }}_amd64.deb
             Muller_etal_2022_SE_1Ga_Opt_PlateMotionModel_v1.2.zip
-          key: pygplates-0.36.0-py312-model-1.2
+          key: pygplates-0.36.0-py${{ steps.python-version.outputs.PYTHON_VERSION }}-model-1.2
 
       - name: Download pygplates dependencies
         if: steps.cache-pygplates.outputs.cache-hit != 'true'
         run: |
-          s3cmd --config=$HOME/.s3cfg/config get --skip-existing s3://gadopt/github-actions/pygplates_0.36.0_py312_amd64.deb
+          s3cmd --config=$HOME/.s3cfg/config get --skip-existing s3://gadopt/github-actions/pygplates_0.36.0_py${{ steps.python-version.outputs.PYTHON_VERSION }}_amd64.deb
           s3cmd --config=$HOME/.s3cfg/config get s3://gadopt/github-actions/Muller_etal_2022_SE_1Ga_Opt_PlateMotionModel_v1.2.zip .
 
       - name: Install Python dependencies
         run: |
           . /home/firedrake/firedrake/bin/activate
           python3 -m pip install .[demos,optimisation]
-          sudo apt install -y --fix-broken ./pygplates_0.36.0_py312_amd64.deb
+          sudo apt install -y --fix-broken ./pygplates_0.36.0_py${{ steps.python-version.outputs.PYTHON_VERSION }}_amd64.deb
           ln -s /usr/lib/pygplates.so /home/firedrake/firedrake/lib/python3.*/site-packages/
 
       - name: Extract plate reconstructions
         run: |
           unzip Muller_etal_2022_SE_1Ga_Opt_PlateMotionModel_v1.2.zip -d demos/gplates_global
 
+      - name: Restore flib (Trim et al., 2023) from cache
+        id: cache-flib
+        uses: actions/cache@v4
+        env:
+          ACTIONS_CACHE_URL: ${{ secrets.ACTIONS_CACHE_URL }}
+        with:
+          path: tests/multi_material/flib.cpython-${{ steps.python-version.outputs.PYTHON_VERSION }}-x86_64-linux-gnu.so
+          key: flib-py${{ steps.python-version.outputs.PYTHON_VERSION }}
+
       - name: Check out repository linked to Trim et al. (2023)
+        if: steps.cache-flib.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: seantrim/exact-thermochem-solution
           path: ./flib
 
       - name: Compile flib (Trim et al., 2023)
+        if: steps.cache-flib.outputs.cache-hit != 'true'
         run: |
           . /home/firedrake/firedrake/bin/activate
           cd flib/Python
