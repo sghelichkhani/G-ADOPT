@@ -49,48 +49,20 @@ jobs:
       OMP_NUM_THREADS: 1
 
     steps:
-      - name: Install prerequisites
-        env:
-          S3CONFIG: ${{ secrets.S3CONFIG }}
-        run: |
-          tsp -S 48
-          mkdir -p $HOME/.s3cfg
-          echo "${S3CONFIG}" > $HOME/.s3cfg/config
-          chmod 600 $HOME/.s3cfg/config
-
       - uses: actions/checkout@v4
         with:
           lfs: true
 
-      - name: Fetch LFS artifacts
+      - name: Set up testing environment
         run: |
           git lfs checkout
+          unzip /home/firedrake/Muller_etal_2022_SE_1Ga_Opt_PlateMotionModel_v1.2.zip -d demos/gplates_global
+          tsp -S 48
 
       - name: Install Python dependencies
         run: |
           . /home/firedrake/firedrake/bin/activate
           python3 -m pip install .[demos,optimisation]
-
-      - name: Get Muller et al 2022 plate reconstructions
-        run: |
-          s3cmd --config=$HOME/.s3cfg/config get s3://gadopt/github-actions/Muller_etal_2022_SE_1Ga_Opt_PlateMotionModel_v1.2.zip .
-          unzip Muller_etal_2022_SE_1Ga_Opt_PlateMotionModel_v1.2.zip -d demos/gplates_global
-
-      - name: Check out repository linked to Trim et al. (2023)
-        uses: actions/checkout@v4
-        with:
-          repository: seantrim/exact-thermochem-solution
-          path: ./flib
-
-      - name: Compile flib (Trim et al., 2023)
-        run: |
-          . /home/firedrake/firedrake/bin/activate
-          cd flib/Python
-          rm *.so
-          sed -i 's/f2py3/f2py/' create_library.sh
-          source create_library.sh
-          cp *.so ../../tests/multi_material
-        shell: bash
 
       - name: Run test
         id: run_tests
