@@ -382,7 +382,8 @@ class BoundaryNormalStressSolver:
 
         # take the average out
         vave = fd.assemble(self.force * self.ds)
-        self.force.assign(self.force - vave)
+        area = fd.assemble(fd.Constant(1, domain=self.mesh) * self.ds)
+        self.force.assign(self.force - vave/area)
 
         # re-apply the zero condition everywhere except for the
         self.interior_null_bc.apply(self.force)
