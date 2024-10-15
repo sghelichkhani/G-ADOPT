@@ -7,6 +7,8 @@ from .approximations import (
     ExtendedBoussinesqApproximation,
     TruncatedAnelasticLiquidApproximation,
     SmallDisplacementViscoelasticApproximation,
+    MaxwellDisplacementApproximation,
+    CompressibleInternalVariableApproximation,
 )
 from .diagnostics import GeodynamicalDiagnostics
 from .energy_solver import EnergySolver
@@ -22,7 +24,7 @@ from .limiter import VertexBasedP1DGLimiter
 from .momentum_equation import StokesEquations
 from .preconditioners import FreeSurfaceMassInvPC, SPDAssembledPC
 from .scalar_equation import EnergyEquation
-from .stokes_integrators import StokesSolver, ViscoelasticStokesSolver, create_stokes_nullspace
+from .stokes_integrators import CompressibleViscoelasticStokesSolver, StokesSolver, ViscoelasticStokesSolver, create_stokes_nullspace
 from .time_stepper import BackwardEuler, CrankNicolsonRK, ImplicitMidpoint, eSSPRKs3p3, eSSPRKs10p3
 from .utility import (
     InteriorBC,
@@ -35,5 +37,6 @@ from .utility import (
     timer_decorator,
 )
 from .viscoelastic_equation import ViscoelasticEquations
+from .internal_variable_solver import InternalVariableSolver
 
 PETSc.Sys.popErrorHandler()

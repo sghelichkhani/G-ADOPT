@@ -421,7 +421,6 @@ class SmallDisplacementViscoelasticApproximation():
     """Small Displacement Viscoelastic approximation:
 
     Small displacement linearises the problem. rho = rho0 + rho1. Perturbation about a reference state"""
-    compressible = False
 
     def __init__(self, viscosity, shear_modulus, g=1):
         """
@@ -433,6 +432,33 @@ class SmallDisplacementViscoelasticApproximation():
 
         self.maxwell_time = viscosity / shear_modulus
 
+    def rho_continuity(self):
+        return 1
+
+    def buoyancy(self, displacement, background_density):
+        # Buoyancy term rho1, coming from linearisation and integrating the continuity equation w.r.t time
+        # accounts for advection of density in the absence of an evolution equation for temperature
+        return -self.g * -inner(displacement, grad(background_density))
+
+    def free_surface_terms(self, eta, *, delta_rho_fs=1):
+        free_surface_normal_stress = delta_rho_fs * self.g * eta
+        # prefactor only needed when solving eta as part of mixed system
+        return free_surface_normal_stress, None
+
+
+class MaxwellDisplacementApproximation(SmallDisplacementViscoelasticApproximation):
+
+    """Small Displacement Viscoelastic approximation:
+
+    Small displacement linearises the problem. rho = rho0 + rho1. Perturbation about a reference state"""
+    compressible = False
+
+    def __init__(self, viscosity, shear_modulus, **kwargs):
+        """
+        :arg kappa, g, rho, alpha:  Diffusivity, gravitational acceleration, reference density and thermal expansion coefficient
+                                    Normally kept at 1 when non-dimensionalised."""
+        super().__init__(viscosity, shear_modulus, **kwargs)
+
     def effective_viscosity(self, dt):
         return self.viscosity / (self.maxwell_time + dt / 2)
 
@@ -442,15 +468,33 @@ class SmallDisplacementViscoelasticApproximation():
     def stress(self, u, dt):
         return 2 * self.effective_viscosity(dt) * sym(grad(u))
 
-    def buoyancy(self, displacement, background_density):
-        # Buoyancy term rho1, coming from linearisation and integrating the continuity equation w.r.t time
-        # accounts for advection of density in the absence of an evolution equation for temperature
-        return -self.g * -inner(displacement, grad(background_density))
 
-    def free_surface_terms(self, p, T, eta, theta_fs, *, delta_rho_fs=1):
-        free_surface_normal_stress = delta_rho_fs * self.g * eta
-        # prefactor only needed when solving eta as part of mixed system
-        return free_surface_normal_stress, None
+class CompressibleInternalVariableApproximation(SmallDisplacementViscoelasticApproximation):
 
-    def rho_continuity(self):
-        return 1
+    """Small Displacement Viscoelastic approximation:
+
+    Small displacement linearises the problem. rho = rho0 + rho1. Perturbation about a reference state"""
+    compressible = True
+
+    def __init__(self, bulk_modulus, viscosity, shear_modulus, **kwargs):
+        """
+        :arg kappa, g, rho, alpha:  Diffusivity, gravitational acceleration, reference density and thermal expansion coefficient
+                                    Normally kept at 1 when non-dimensionalised."""
+        self.bulk_modulus = bulk_modulus
+        super().__init__(viscosity, shear_modulus, **kwargs)
+
+    def div_u(self, u):
+        dim = len(u)
+        return div(u) * Identity(dim)
+
+    def deviatoric_strain(self, u):
+        div_u = self.div_u(u)
+        return sym(grad(u)) - 1/3 * div_u
+
+    def stress(self, u, m):
+        div_u = self.div_u(u)
+        d = self.deviatoric_strain(u)
+        stress = self.bulk_modulus * div_u + 2 * self.shear_modulus * d
+#        for m in m_list:
+        stress -= 2 * self.shear_modulus * m
+        return stress

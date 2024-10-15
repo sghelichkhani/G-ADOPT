@@ -1,5 +1,6 @@
-from .equations import BaseTerm
-from .momentum_equation import MomentumEquation, ContinuityEquation
+from .equations import BaseTerm, BaseEquation
+from .momentum_equation import MomentumEquation, ContinuityEquation, ViscosityTerm, MomentumSourceTerm
+from .scalar_equation import ScalarSourceTerm, ScalarAbsorptionTerm
 from firedrake import nabla_grad, inner
 r"""
 This module contains the additional terms and equations necessary for viscoelasticity
@@ -50,3 +51,14 @@ def ViscoelasticEquations(test_space, trial_space, quad_degree=None, **kwargs):
     mom_eq = ViscoelasticEquation(test_space.sub(0), trial_space.sub(0), quad_degree=quad_degree, **kwargs)
     cty_eq = ContinuityEquation(test_space.sub(1), trial_space.sub(1), quad_degree=quad_degree, **kwargs)
     return [mom_eq, cty_eq]
+
+
+class CompressibleViscoelasticEquation(BaseEquation):
+    """Source and absorption terms."""
+    """Momentum equation with viscosity, pressure gradient, and source terms."""
+    terms = [ViscosityTerm, MomentumSourceTerm]
+
+
+class InternalVariableEquation(BaseEquation):
+    """Source and absorption terms."""
+    terms = [ScalarSourceTerm, ScalarAbsorptionTerm]

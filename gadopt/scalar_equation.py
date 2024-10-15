@@ -188,7 +188,7 @@ class ScalarSourceTerm(BaseTerm):
         source = fields['source']
 
         # NOTE, here source term F is already on the RHS
-        F = dot(phi, source)*self.dx
+        F = inner(phi, source)*self.dx
 
         return F
 
@@ -212,7 +212,7 @@ class ScalarAbsorptionTerm(BaseTerm):
 
         # The absorption term F is already on the right-hand side.
         # Implement absorption term implicitly at current time step.
-        F = -dot(phi, alpha*trial)*self.dx
+        F = -inner(phi, alpha*trial)*self.dx
 
         return F
 

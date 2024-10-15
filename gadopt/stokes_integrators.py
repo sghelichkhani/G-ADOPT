@@ -13,7 +13,7 @@ import firedrake as fd
 from .approximations import BaseApproximation, AnelasticLiquidApproximation
 from .free_surface_equation import FreeSurfaceEquation
 from .momentum_equation import StokesEquations
-from .viscoelastic_equation import ViscoelasticEquations
+from .viscoelastic_equation import ViscoelasticEquations, CompressibleViscoelasticEquation
 from .equations import BaseEquation
 from .utility import DEBUG, INFO, InteriorBC, depends_on, log_level, upward_normal
 
@@ -570,7 +570,7 @@ class ViscoelasticStokesSolver(StokesSolver):
             'velocity': self.u,  # This is incremental displacement (m)
             'pressure': self.p,
             'stress': self.approximation.stress(self.u, self.dt),
-            'displacement': self.density,
+            'displacement': self.density,  # ???
             'previous_stress': self.previous_stress,
             'viscosity': self.approximation.effective_viscosity(self.dt),
             'interior_penalty': fd.Constant(2.0),  # allows for some wiggle room in imposition of weak BCs
@@ -591,7 +591,7 @@ class ViscoelasticStokesSolver(StokesSolver):
             implicit_displacement_up = fd.dot(implicit_displacement, self.k)
             # Add free surface stress term. This is also referred to as the Hydrostatic Prestress advection term in the GIA literature.
             normal_stress, _ = self.approximation.free_surface_terms(
-                self.p, self.T, implicit_displacement_up, self.free_surface_theta, **free_surface_params
+                implicit_displacement_up, **free_surface_params
             )
             if 'normal_stress' in self.weak_bcs[free_surface_id]:
                 # Usually there will be also an ice/water loadi acting as a normal stress in the GIA problem
@@ -610,3 +610,230 @@ class ViscoelasticStokesSolver(StokesSolver):
         # Update history stress term for using as a RHS explicit forcing in the next timestep
         self.previous_stress.interpolate(self.prefactor_prestress * self.deviatoric_stress)
         self.displacement.interpolate(self.displacement+self.stokes_subfunctions[0])
+
+
+class CompressibleViscoelasticStokesSolver:
+    """Solves the Stokes system in place.
+
+    Arguments:
+      z: Firedrake function representing mixed Stokes system
+      T: Firedrake function representing temperature
+      approximation: Approximation describing system of equations
+      bcs: Dictionary of identifier-value pairs specifying boundary conditions
+      quad_degree: Quadrature degree. Default value is `2p + 1`, where
+                   p is the polynomial degree of the trial space
+      solver_parameters: Either a dictionary of PETSc solver parameters or a string
+                         specifying a default set of parameters defined in G-ADOPT
+      J: Firedrake function representing the Jacobian of the system
+      constant_jacobian: Whether the Jacobian of the system is constant
+      free_surface_dt: Timestep for advancing free surface equation
+      free_surface_theta: Timestepping prefactor for free surface equation, where
+                          theta = 0: Forward Euler, theta = 0.5: Crank-Nicolson (default),
+                          or theta = 1: Backward Euler
+      equations: GADOPT system of equations to solve. StokesEquations (default) or Viscoelastic (equations)
+
+    """
+
+    name = "Stokes"
+
+    def __init__(
+        self,
+        z: fd.Function,
+        m: fd.Function,
+        density: fd.Function,
+        approximation: BaseApproximation,
+        dt,
+        bcs: dict[int, dict[str, Number]] = {},
+        quad_degree: int = 6,
+        solver_parameters: Optional[dict[str, str | Number] | str] = None,
+        J: Optional[fd.Function] = None,
+        constant_jacobian: bool = False,
+        equations: BaseEquation = CompressibleViscoelasticEquation,
+        **kwargs,
+    ):
+        self.Z = z.function_space()
+        self.mesh = self.Z.mesh()
+        self.test = fd.TestFunction(self.Z)
+        self.equations = equations(self.Z, self.Z, quad_degree=quad_degree,
+                                   compressible=approximation.compressible)
+
+        print(self.equations._terms)
+
+        self.u = z
+        self.solution = z
+        self.m = m
+        self.density = density
+        self.approximation = approximation
+
+        self.J = J
+        self.constant_jacobian = constant_jacobian
+        self.approximation.mu = self.approximation.viscosity ### FIXME
+        self.linear = not depends_on(self.approximation.mu, self.solution)
+
+        self.solver_kwargs = kwargs
+        self.k = upward_normal(self.Z.mesh())
+        self.quad_degree = quad_degree
+
+        self.setup_fields()
+
+        # Setup boundary conditions
+        self.weak_bcs = {}
+        self.strong_bcs = []
+
+        # Free surface parameters
+        self.free_surface_dict = {}  # Separate dictionary for copying free surface information
+        self.free_surface = False
+
+        for id, bc in bcs.items():
+            weak_bc = {}
+            for bc_type, value in bc.items():
+                if bc_type == 'u':
+                    self.strong_bcs.append(fd.DirichletBC(self.Z, value, id))
+                elif bc_type == 'ux':
+                    self.strong_bcs.append(fd.DirichletBC(self.Z.sub(0), value, id))
+                elif bc_type == 'uy':
+                    self.strong_bcs.append(fd.DirichletBC(self.Z.sub(1), value, id))
+                elif bc_type == 'uz':
+                    self.strong_bcs.append(fd.DirichletBC(self.Z.sub(2), value, id))
+                elif bc_type == 'free_surface':
+                    # N.b. stokes_integrators assumes that the order of the bcs matches the order of the
+                    # free surfaces defined in the mixed space. This is not ideal - python dictionaries
+                    # are ordered by insertion only since recently (since 3.7) - so relying on their order
+                    # is fraught and not considered pythonic. At the moment let's consider having more
+                    # than one free surface a bit of a niche case for now, and leave it as is...
+
+                    # Copy free surface information to a new dictionary
+                    self.free_surface_dict[id] = value
+                    self.free_surface = True
+                else:
+                    weak_bc[bc_type] = value
+            self.weak_bcs[id] = weak_bc
+
+        if self.free_surface:
+            self.setup_free_surface()
+
+        # Add terms to Stokes Equations
+        self.F = 0
+        self.F -= self.equations.residual(self.test, self.solution, self.solution, self.fields, bcs=self.weak_bcs)
+        scale_mu = fd.Constant(1e10)  # this is a scaling factor roughly size of mantle maxwell time to make sure that solve converges with strong bcs in parallel...
+        self.F = (1 / scale_mu)*self.F
+
+        if isinstance(solver_parameters, dict):
+            self.solver_parameters = solver_parameters
+        else:
+            if self.linear:
+                self.solver_parameters = {"snes_type": "ksponly"}
+            else:
+                self.solver_parameters = newton_stokes_solver_parameters.copy()
+
+            if INFO >= log_level:
+                self.solver_parameters["snes_monitor"] = None
+
+            if isinstance(solver_parameters, str):
+                match solver_parameters:
+                    case "direct":
+                        self.solver_parameters.update(direct_stokes_solver_parameters)
+                    case "iterative":
+                        self.solver_parameters.update(
+                            iterative_stokes_solver_parameters
+                        )
+                    case _:
+                        raise ValueError(
+                            f"Solver type '{solver_parameters}' not implemented."
+                        )
+            elif self.mesh.topological_dimension() == 2 and self.mesh.cartesian:
+                self.solver_parameters.update(direct_stokes_solver_parameters)
+            else:
+                self.solver_parameters.update(iterative_stokes_solver_parameters)
+
+            if self.solver_parameters.get("pc_type") == "fieldsplit":
+                # extra options for iterative solvers
+                if DEBUG >= log_level:
+                    self.solver_parameters['fieldsplit_0']['ksp_converged_reason'] = None
+                    self.solver_parameters['fieldsplit_1']['ksp_monitor'] = None
+                elif INFO >= log_level:
+                    self.solver_parameters['fieldsplit_1']['ksp_converged_reason'] = None
+
+                if self.free_surface:
+                    # merge free surface fields with pressure field for Schur complement solve
+                    self.solver_parameters.update({"pc_fieldsplit_0_fields": '0',
+                                                   "pc_fieldsplit_1_fields": '1,'+','.join(str(2+i) for i in range(len(self.eta)))})
+
+                    # update keys for GADOPT's free surface mass inverse preconditioner
+                    self.solver_parameters["fieldsplit_1"].update({"pc_python_type": "gadopt.FreeSurfaceMassInvPC"})
+
+        # solver object is set up later to permit editing default solver parameters specified above
+        self._solver_setup = False
+
+    def setup_fields(self):
+        self.fields = {
+            'velocity': self.u,  # Really this is displacement
+            'stress': self.approximation.stress(self.u, self.m),
+            'viscosity': self.approximation.mu, ### FIXME
+            'interior_penalty': fd.Constant(2.0),  # allows for some wiggle room in imposition of weak BCs
+                                                   # 6.25 matches C_ip=100. in "old" code for Q2Q1 in 2d.
+            'source': self.approximation.buoyancy(self.solution, self.density) * self.k,
+        }
+
+    def setup_free_surface(self):
+        # Overload method
+        for free_surface_id, free_surface_params in self.free_surface_dict.items():
+            # First, make the displacement term implicit by incorporating
+            # the unknown `incremental displacement' (u) that
+            # we are solving for
+            implicit_displacement = self.u
+            implicit_displacement_up = fd.dot(implicit_displacement, self.k)
+            # Add free surface stress term. This is also referred to as the Hydrostatic Prestress advection term in the GIA literature.
+            normal_stress, _ = self.approximation.free_surface_terms(
+                implicit_displacement_up, **free_surface_params
+            )
+            if 'normal_stress' in self.weak_bcs[free_surface_id]:
+                # Usually there will be also an ice/water loadi acting as a normal stress in the GIA problem
+                existing_value = self.weak_bcs[free_surface_id]['normal_stress']
+                self.weak_bcs[free_surface_id]['normal_stress'] = existing_value + normal_stress
+            else:
+                self.weak_bcs[free_surface_id] = {'normal_stress': normal_stress}
+
+        # Turn off free surface flag because the viscoelastic free surface (for the small displacement approximation) is now setup
+        self.free_surface = False
+
+
+    def setup_solver(self):
+        """Sets up the solver."""
+        # mu used in MassInvPC:
+        appctx = {"mu": self.approximation.mu / self.approximation.rho_continuity()}
+
+        if self.free_surface:
+            appctx["free_surface_id_list"] = self.free_surface_id_list
+            appctx["ds"] = self.equations[2].ds
+
+        if self.constant_jacobian:
+            z_tri = fd.TrialFunction(self.Z)
+            F_stokes_lin = fd.replace(self.F, {self.solution: z_tri})
+            a, L = fd.lhs(F_stokes_lin), fd.rhs(F_stokes_lin)
+            self.problem = fd.LinearVariationalProblem(a, L, self.solution,
+                                                       bcs=self.strong_bcs,
+                                                       constant_jacobian=True)
+            self.solver = fd.LinearVariationalSolver(self.problem,
+                                                     solver_parameters=self.solver_parameters,
+                                                     options_prefix=self.name,
+                                                     appctx=appctx,
+                                                     **self.solver_kwargs)
+        else:
+            self.problem = fd.NonlinearVariationalProblem(self.F, self.solution,
+                                                          bcs=self.strong_bcs, J=self.J)
+            self.solver = fd.NonlinearVariationalSolver(self.problem,
+                                                        solver_parameters=self.solver_parameters,
+                                                        options_prefix=self.name,
+                                                        appctx=appctx,
+                                                        **self.solver_kwargs)
+
+        self._solver_setup = True
+
+    def solve(self):
+        """Solves the system."""
+        if not self._solver_setup:
+            self.setup_solver()
+
+        self.solver.solve()
+
