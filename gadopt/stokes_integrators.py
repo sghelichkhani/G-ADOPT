@@ -667,7 +667,7 @@ class CompressibleViscoelasticStokesSolver:
 
         self.J = J
         self.constant_jacobian = constant_jacobian
-        self.approximation.mu = self.approximation.viscosity ### FIXME
+        self.approximation.mu = self.approximation.viscosity  # FIXME
         self.linear = not depends_on(self.approximation.mu, self.solution)
 
         self.solver_kwargs = kwargs
@@ -769,7 +769,7 @@ class CompressibleViscoelasticStokesSolver:
         self.fields = {
             'velocity': self.u,  # Really this is displacement
             'stress': self.approximation.stress(self.u, self.m),
-            'viscosity': self.approximation.mu, ### FIXME
+            'viscosity': self.approximation.mu,  # FIXME
             'interior_penalty': fd.Constant(2.0),  # allows for some wiggle room in imposition of weak BCs
                                                    # 6.25 matches C_ip=100. in "old" code for Q2Q1 in 2d.
             'source': self.approximation.buoyancy(self.solution, self.density) * self.k,
@@ -796,7 +796,6 @@ class CompressibleViscoelasticStokesSolver:
 
         # Turn off free surface flag because the viscoelastic free surface (for the small displacement approximation) is now setup
         self.free_surface = False
-
 
     def setup_solver(self):
         """Sets up the solver."""
@@ -836,4 +835,3 @@ class CompressibleViscoelasticStokesSolver:
             self.setup_solver()
 
         self.solver.solve()
-
