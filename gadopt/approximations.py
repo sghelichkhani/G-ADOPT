@@ -498,3 +498,9 @@ class CompressibleInternalVariableApproximation(SmallDisplacementViscoelasticApp
 #        for m in m_list:
         stress -= 2 * self.shear_modulus * m
         return stress
+
+    def buoyancy(self, displacement, background_density):
+        # Buoyancy term rho1, coming from linearisation and integrating the continuity equation w.r.t time
+        # accounts for advection of density in the absence of an evolution equation for temperature
+        buoyancy = super().buoyancy(displacement, background_density)
+        return buoyancy - self.g * -background_density * div(displacement)

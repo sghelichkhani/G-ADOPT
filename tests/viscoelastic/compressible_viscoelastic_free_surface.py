@@ -62,7 +62,7 @@ def viscoelastic_model(nx=80, dt_factor=0.1, sim_time="long", shear_modulus=1e11
     viscosity = Constant(1e21)  # Viscosity Pa s
     shear_modulus = Constant(shear_modulus)  # Shear modulus in Pa
     maxwell_time = viscosity / shear_modulus
-    bulk_modulus = Constant(10*shear_modulus)
+    bulk_modulus = Constant(2*shear_modulus)
 
     # Set up surface load
     lam = D / 8  # wavelength of load in m
@@ -185,8 +185,8 @@ def run_benchmark(case_name):
     # Run default case run for four dt factors
     dtf_start = params[case_name]["dtf_start"]
     params[case_name].pop("dtf_start")  # Don't pass this to viscoelastic_model
-    dt_factors = dtf_start / (2 ** np.arange(6))
-    prefix = f"errors-{case_name}-compressible-internalvariable_bulk10xshear_80cells_dtfstart0.01_fsu_stressu_newhelastic"
+    dt_factors = dtf_start / (2 ** np.arange(9))
+    prefix = f"errors-{case_name}-compressible-internalvariable_bulk2xshear_80cells_dtfstart0.01_fsu_stressu_newhelastic_compressiblebuoyancy"
     errors = np.array([viscoelastic_model(dt_factor=dtf, **params[case_name]) for dtf in dt_factors])
     np.savetxt(f"{prefix}-free-surface.dat", errors)
     ref = errors[-1]
