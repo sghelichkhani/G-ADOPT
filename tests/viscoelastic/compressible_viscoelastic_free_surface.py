@@ -140,10 +140,11 @@ def viscoelastic_model(nx=80, dt_factor=0.1, sim_time="long", shear_modulus=1e11
 #        displacement_min = vertical_displacement.comm.allreduce(displacement_z_min, MPI.MIN)  # Minimum displacement at surface (should be top left corner with greatest (-ve) deflection due to ice loading
 #        log("Greatest (-ve) displacement", displacement_min)
 
-        time.assign(time+dt)
 
         # Update analytical solution
         eta_analytical.interpolate(((F0 - h_elastic) * (1-exp(-(time)/(tau0+f_e*maxwell_time)))+h_elastic) * cos(kk * X[0]))
+        
+        time.assign(time+dt) # Update time after because first solve with internal variable really is at t = 0?
 
         # Calculate error
         local_error = assemble(pow(u[1]-eta_analytical, 2)*ds(top_id))
@@ -185,8 +186,8 @@ def run_benchmark(case_name):
     # Run default case run for four dt factors
     dtf_start = params[case_name]["dtf_start"]
     params[case_name].pop("dtf_start")  # Don't pass this to viscoelastic_model
-    dt_factors = dtf_start / (2 ** np.arange(9))
-    prefix = f"errors-{case_name}-compressible-internalvariable_bulk2xshear_80cells_dtfstart0.01_fsu_stressu_newhelastic_compressiblebuoyancy"
+    dt_factors = dtf_start / (2 ** np.arange(4))
+    prefix = f"errors-{case_name}-compressible-internalvariable_bulk2xshear_80cells_dtfstart0.1_fsu_stressu_newhelastic_compressiblebuoyancy_dtafter"
     errors = np.array([viscoelastic_model(dt_factor=dtf, **params[case_name]) for dtf in dt_factors])
     np.savetxt(f"{prefix}-free-surface.dat", errors)
     ref = errors[-1]
