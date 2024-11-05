@@ -186,9 +186,9 @@ T.project(Tic, bcs=energy_solver.strong_bcs)
 u_misfit = 0.0
 
 # Next populate the tape by running the forward simulation. ** NOTE ** for the purpose of this tutorial, we only
-# invert for a total of 5 time-steps. This makes it tractable to run this within a tutorial session. To run for
-# the simulation's full duration, change the initial time-step to `0` instead of `timesteps - 5`.
-initial_timestep = timesteps - 5
+# invert for a total of 20 time-steps. This makes it tractable to run this within a tutorial session. To run for
+# the simulation's full duration, change the initial time-step to `0` instead of `timesteps - 20`.
+initial_timestep = timesteps - 20
 for time_idx in range(initial_timestep, timesteps):
     stokes_solver.solve()
     energy_solver.solve()
@@ -366,10 +366,10 @@ minimisation_problem = MinimizationProblem(reduced_functional, bounds=(T_lb, T_u
 # optimisation problems.
 #
 # For our solution of the optimisation problem we use the pre-defined paramters set in gadopt by using `minimsation_parameters`.
-# Here, we set the number of iterations to only 10, as opposed to the default 100. We also adjust the step-length for this problem,
+# Here, we set the number of iterations to only 50, as opposed to the default 100. We also adjust the step-length for this problem,
 # by setting it to a lower value than our default.
 
-minimisation_parameters["Status Test"]["Iteration Limit"] = 10
+minimisation_parameters["Status Test"]["Iteration Limit"] = 50
 minimisation_parameters["Step"]["Trust Region"]["Initial Radius"] = 1e-2
 
 # A notable feature of this optimisation approach in ROL is its checkpointing capability. For every iteration,
@@ -421,8 +421,8 @@ reduced_functional.eval_cb_post = record_value
 optimiser.run()
 # -
 
-# At this point a total number of 10 iterations are performed. For the example
-# case here with 5 timesteps this should result an adequete reduction
+# At this point a total number of 50 iterations are performed. For the example
+# case here with 20 timesteps this should result an adequete reduction
 # in the objective functional. Now we can look at the solution
 # visually. For the actual simulation with 80 time-steps, this solution
 # could be compared to `Tic_ref` as the "true solution".
@@ -435,7 +435,7 @@ optimiser.run()
 # plotter = pv.Plotter()
 # # Add the dataset to the plotter
 # plotter.add_mesh(dataset, scalars=dataset[0].array_names[0], cmap='coolwarm')
-# plotter.add_text("Solution after 10 iterations", font_size=10)
+# plotter.add_text("Solution after 50 iterations", font_size=10)
 # # Adjust the camera position
 # plotter.camera_position = [(0.5, 0.5, 2.5), (0.5, 0.5, 0), (0, 1, 0)]
 # # Show the plot
