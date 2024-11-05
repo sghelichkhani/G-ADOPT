@@ -165,6 +165,7 @@ Q1 = FunctionSpace(mesh, "CG", 1)
 
 # Create a function for the initial temperature field:
 Tic = Function(Q1, name="Initial Temperature")
+T_0 = Function(Q, name="Temperature_0")
 
 # Project the temperature field from the reference simulation's final time-step onto the control space as our
 # initial guess:
@@ -176,7 +177,8 @@ with CheckpointFile(checkpoint_filename, mode="r") as fi:
 control = Control(Tic)
 
 # Take our initial guess and project from Q1 to Q2, simultaneously imposing strong temperature boundary conditions.
-T.project(Tic, bcs=energy_solver.strong_bcs)
+T_0.project(Tic, bcs=energy_solver.strong_bcs)
+T.assign(T_0)
 
 # We continue by integrating the solutions at each time-step.
 # Notice that we cumulatively compute the misfit term with respect to the
@@ -188,7 +190,7 @@ u_misfit = 0.0
 # Next populate the tape by running the forward simulation. ** NOTE ** for the purpose of this tutorial, we only
 # invert for a total of 5 time-steps. This makes it tractable to run this within a tutorial session. To run for
 # the simulation's full duration, change the initial time-step to `0` instead of `timesteps - 5`.
-initial_timestep = timesteps - 5
+initial_timestep = timesteps - 1
 for time_idx in range(initial_timestep, timesteps):
     stokes_solver.solve()
     energy_solver.solve()
@@ -248,7 +250,7 @@ with CheckpointFile(checkpoint_filename, mode="r") as fi:
 # Define component terms of overall objective functional and their normalisation terms:
 damping = assemble((Tic - Taverage) ** 2 * dx)
 norm_damping = assemble(Taverage**2 * dx)
-smoothing = assemble(dot(grad(Tic - Taverage), grad(Tic - Taverage)) * dx)
+smoothing = assemble(dot(grad(T_0 - Taverage), grad(T_0 - Taverage)) * dx)
 norm_smoothing = assemble(dot(grad(Tobs), grad(Tobs)) * dx)
 norm_obs = assemble(Tobs**2 * dx)
 norm_u_surface = assemble(dot(uobs, uobs) * ds_t)
@@ -263,9 +265,9 @@ alpha_s = 1e-1
 
 # Define overall objective functional:
 objective = (
-    t_misfit +
-    alpha_u * (norm_obs * u_misfit / timesteps / norm_u_surface) +
-    alpha_d * (norm_obs * damping / norm_damping) +
+    # t_misfit +
+    # alpha_u * (norm_obs * u_misfit / timesteps / norm_u_surface) +
+    # alpha_d * (norm_obs * damping / norm_damping) +
     alpha_s * (norm_obs * smoothing / norm_smoothing)
 )
 # -
@@ -287,6 +289,10 @@ reduced_functional = ReducedFunctional(objective, control)
 
 pause_annotation()
 
+der = reduced_functional.derivative()
+fi = VTKFile("test.pvd")
+fi.write(der)
+raise Exception()
 # We can print the contents of the tape at this stage to verify that it is not empty.
 
 # + tags=["active-ipynb"]
