@@ -165,7 +165,7 @@ Q1 = FunctionSpace(mesh, "CG", 1)
 
 # Create a function for the initial temperature field:
 Tic = Function(Q1, name="Initial Temperature")
-T_0 = Function(Q, name="Temperature_0")
+T_0 = Function(Q1, name="Temperature_0")
 
 # Project the temperature field from the reference simulation's final time-step onto the control space as our
 # initial guess:
@@ -177,8 +177,9 @@ with CheckpointFile(checkpoint_filename, mode="r") as fi:
 control = Control(Tic)
 
 # Take our initial guess and project from Q1 to Q2, simultaneously imposing strong temperature boundary conditions.
-T_0.project(Tic, bcs=energy_solver.strong_bcs)
-T.assign(T_0)
+bc_T_0 = [DirichletBC(Q1, 0, top_id), DirichletBC(Q1, 1., bottom_id)]
+T_0.project(Tic, bcs=bc_T_0)
+T.project(T_0)
 
 # We continue by integrating the solutions at each time-step.
 # Notice that we cumulatively compute the misfit term with respect to the
