@@ -15,38 +15,32 @@
 # provides access to Firedrake and associated functionality.
 
 from gadopt import *
-from gadopt.inverse import *
-from gadopt.utility import step_func, vertical_component
+from gadopt.utility import step_func, vertical_component, CombinedSurfaceMeasure
 import pyvista as pv
 import matplotlib.pyplot as plt
 
 
-# +
-
+from gadopt.inverse import *
 tape = get_working_tape()
 tape.clear_tape()
-# -
 
-# In this tutorial we are going to use a fully unstructured mesh, created using [Gmsh](https://gmsh.info/). We have used Gmsh to construct a triangular mesh with a target resolution of 200km near the surface of the Earth coarsening to 500 km in the interior. Gmsh is a widely used open source software for creating finite element meshes and Firedrake has inbuilt functionaly to read Gmsh '.msh' files. Take a look at the *annulus_unstructured.py* script in this folder which creates the mesh using Gmsh's Python api.
-#
-# As this problem is not formulated in a Cartesian geometry we set the `mesh.cartesian`
-# attribute to `False`. This ensures the correct configuration of a radially inward vertical direction.
+# In this tutorial we are going load the mesh created by the forward cylindrical demo in the previous tutorial. This makes it easier to load the synthetic data from the previous tutorial for our 'twin' experiment. N.b. You have to run that demo first so the checkpoint is available!
 
 # Set up geometry:
-checkpoint_file = "../gia_2d_cylindrical/viscoelastic_loading-chk.h5"
+checkpoint_file = "../2d_cylindrical/viscoelastic_loading-chk.h5"
 with CheckpointFile(checkpoint_file, 'r') as afile:
-    mesh = afile.load_mesh() # FIXME: name = ....
-bottom_id, top_id = 1, 2
+    mesh = afile.load_mesh(name='surface_mesh_extruded')
+bottom_id, top_id = "bottom", "top"
 mesh.cartesian = False
 D = 2891e3  # Depth of domain in m
 
-# We next set up the function spaces, and specify functions to hold our solutions. As our mesh is now made up of triangles instead of quadrilaterals, the syntax for defining our finite elements changes slighty. We need to specify *Continuous Galerkin* elements, i.e. replace `Q` with `CG` instead.
+# We next set up the function spaces, and specify functions to hold our solutions.
 
 # +
 # Set up function spaces - currently using the bilinear Q2Q1 element pair:
-V = VectorFunctionSpace(mesh, "CG", 2)  # (Incremental) Displacement function space (vector)
+V = VectorFunctionSpace(mesh, "Q", 2)  # (Incremental) Displacement function space (vector)
 W = FunctionSpace(mesh, "CG", 1)  # Pressure function space (scalar)
-TP1 = TensorFunctionSpace(mesh, "DG", 2)  # (Discontinuous) Stress tensor function space (tensor)
+S = TensorFunctionSpace(mesh, "DG", 2)  # (Discontinuous) Stress tensor function space (tensor)
 R = FunctionSpace(mesh, "R", 0)  # Real function space (for constants)
 
 Z = MixedFunctionSpace([V, W])  # Mixed function space.
@@ -57,7 +51,7 @@ z.subfunctions[0].rename("Incremental Displacement")
 z.subfunctions[1].rename("Pressure")
 
 displacement = Function(V, name="displacement").assign(0)
-stress_old = Function(TP1, name="stress_old").assign(0)
+stress_old = Function(S, name="stress_old").assign(0)
 # -
 
 # Let's set up the background profiles for the material properties with the same values as before. 
@@ -163,7 +157,6 @@ target_normalised_ice_thickness.interpolate(disc1 + (Hice2/Hice1)*disc2)
 
 normalised_ice_thickness = Function(W, name="normalised ice thickness")
 adj_ice_file = VTKFile(f"adj_ice.pvd")
-top_id = 2
 #converter = RieszL2BoundaryRepresentation(W, top_id)  # convert to surface L2 representation
 
 control = Control(normalised_ice_thickness)
@@ -226,8 +219,7 @@ def add_viscosity(p):
         visc_data,
         component=None,
         lighting=False,
-        show_edges=True,
-        edge_color='grey',
+        show_edges=False,
         cmap=visc_cmap,
         clim=[-3, 2],
         scalar_bar_args={
@@ -273,7 +265,7 @@ def add_viscosity(p):
 Tstart = 0
 time = Function(R).assign(Tstart * year_in_seconds)
 
-dt_years = 200
+dt_years = 250
 dt = Constant(dt_years * year_in_seconds)
 Tend_years = 10e3
 Tend = Constant(Tend_years * year_in_seconds)
@@ -287,8 +279,6 @@ dump_period = round(dt_out / dt)
 log("dump_period:", dump_period)
 log(f"dt: {float(dt / year_in_seconds)} years")
 log(f"Simulation start time: {Tstart} years")
-
-do_write = True
 # -
 
 # We can now define the boundary conditions to be used in this simulation.  Let's set the bottom and side boundaries to be free slip with no normal flow $\textbf{u} \cdot \textbf{n} =0$. By passing the string `ux` and `uy`, G-ADOPT knows to specify these as Strong Dirichlet boundary conditions.
@@ -298,34 +288,34 @@ do_write = True
 # The `delta_rho_fs` option accounts for the density contrast across the free surface whether there is ice or air above a particular region of the mantle.
 
 # Setup boundary conditions
-stokes_bcs = {top_id: {'normal_stress': ice_load, 'free_surface': {'delta_rho_fs': density - rho_ice*normalised_ice_thickness}},
+exterior_density =  rho_ice * normalised_ice_thickness
+stokes_bcs = {top_id: {'normal_stress': ice_load, 'free_surface': {'delta_rho_fs': density - exterior_density}},
               bottom_id: {'un': 0}
               }
 
 
-# We also need to specify a G-ADOPT approximation which sets up the various parameters and fields needed for the viscoelastic loading problem.
+# We also need to specify a G-ADOPT approximation, nullspaces (and near nullspaces for solver perfomance) and finally the stokes solver as before.  For this tutorial we will use a direct solver for the matrix system, so don't need to provide the near nullspace like before. 
 
 
+# +
 approximation = SmallDisplacementViscoelasticApproximation(density, shear_modulus, viscosity, g=g)
 
-# We finally come to solving the variational problem, with solver
-# objects for the Stokes system created. We pass in the solution fields `z` and various fields needed for the solve along with the approximation, timestep and boundary conditions.
-#
+Z_nullspace = create_stokes_nullspace(Z, closed=False, rotational=True)
 
 stokes_solver = ViscoelasticStokesSolver(z, stress_old, displacement, approximation,
-                                         dt, bcs=stokes_bcs, solver_parameters='direct')
+                                         dt, bcs=stokes_bcs, constant_jacobian=True,
+                                         nullspace=Z_nullspace, transpose_nullspace=Z_nullspace)
+# -
 
 # We next set up our output, in VTK format. This format can be read by programs like pyvista and Paraview.
 
 # +
-if do_write:
-    # Create a velocity function for plotting
-    velocity = Function(V, name="velocity")
-    velocity.interpolate(z.subfunctions[0]/dt)
-
-    # Create output file
-    output_file = VTKFile("output.pvd")
-    output_file.write(*z.subfunctions, displacement, velocity)
+# Create a velocity function for plotting
+velocity = Function(V, name="velocity")
+velocity.interpolate(z.subfunctions[0]/dt)
+# Create output file
+output_file = VTKFile("output.pvd")
+output_file.write(*z.subfunctions, displacement, velocity)
 
 plog = ParameterLog("params.log", mesh)
 plog.log_str(
@@ -334,6 +324,8 @@ plog.log_str(
 
 checkpoint_filename = "viscoelastic_loading-chk.h5"
 
+print(bottom_id)
+print(top_id)
 gd = GeodynamicalDiagnostics(z, density, bottom_id, top_id)
 
 # Initialise a (scalar!) function for logging vertical displacement
@@ -341,7 +333,7 @@ U = FunctionSpace(mesh, "CG", 2)  # (Incremental) Displacement function space (s
 vertical_displacement = Function(U, name="Vertical displacement")
 # -
 
-# Now let's run the simulation! We are going to control the ice thickness using the `ramp` parameter. At each step we call `solve` to calculate the incremental displacement and pressure fields. This will update the displacement at the surface and stress values accounting for the time dependent Maxwell consitutive equation.
+# Now let's run the simulation! At each step we call `solve` to calculate the incremental displacement and pressure fields. This will update the displacement at the surface and stress values accounting for the time dependent Maxwell consitutive equation.
 
 for timestep in range(max_timesteps+1):
 
@@ -354,9 +346,8 @@ for timestep in range(max_timesteps+1):
         # provided dt < maxwell time.
         log("timestep", timestep)
 
-        if do_write:
-            velocity.interpolate(z.subfunctions[0]/dt)
-            output_file.write(*z.subfunctions, displacement, velocity)
+        velocity.interpolate(z.subfunctions[0]/dt)
+        output_file.write(*z.subfunctions, displacement, velocity)
 
         with CheckpointFile(checkpoint_filename, "w") as checkpoint:
             checkpoint.save_function(z, name="Stokes")
@@ -372,81 +363,124 @@ for timestep in range(max_timesteps+1):
         f"{vertical_displacement.dat.data.min()} {vertical_displacement.dat.data.max()}"
     )
 
-# Let's use the python package *PyVista* to plot the magnitude of the displacement field through time. We will use the calculated displacement to artifically scale the mesh. We have exaggerated the stretching by a factor of 1500, **BUT...** it is important to remember this is just for ease of visualisation - the mesh is not moving in reality!
+# As we can see from the plot below there is no displacement at the final time given there is no ice load!
 
 # +
-circumference = 2 * pi * radius_values[0] 
+# plot no displacement!!!
+# -
+
+# Let's load the final displacement from our previous run.
 
 # Define the component terms of the overall objective functional
 with CheckpointFile(checkpoint_file, 'r') as afile:
     target_displacement = afile.load_function(mesh, name="Displacement")
+
+# We can calculate the misfit between the displacement at the surface between the two forward models. It's a good idea to scale the objective function by the 
+
+# +
+circumference = 2 * pi * radius_values[0] 
+
+ds = CombinedSurfaceMeasure(mesh, degree=6)
+
     
 displacement_error = displacement - target_displacement
 displacement_scale = 50
 displacement_misfit = assemble(dot(displacement_error, displacement_error) / (circumference * displacement_scale**2) * ds(top_id))
+# -
+
+# Also a good idea to add smoothing and damping
+
 damping = assemble((normalised_ice_thickness) ** 2 /circumference * ds(top_id))
 smoothing = assemble(dot(grad(normalised_ice_thickness), grad(normalised_ice_thickness)) / circumference * ds(top_id))
+
+
+# finally we can construct the objective summing the terms. let's also pause annotation as we are now done with the forward terms. 
+
+# +
 
 alpha_smoothing = 1e12
 alpha_damping = 0.1
 J = displacement_misfit + alpha_damping * damping + alpha_smoothing * smoothing
 log("J = ", J)
 log("J type = ", type(J))
-
-
 # All done with the forward run, stop annotating anything else to the tape
 pause_annotation()
+# -
 
-updated_ice_thickness = Function(normalised_ice_thickness)
+# Let's setup some call backs to help us keep back of the inversion. 
+
+updated_ice_thickness = Function(normalised_ice_thickness, name="updated ice thickness")
 updated_ice_thickness_file = File(f"update_ice_thickness.pvd")
 updated_displacement = Function(displacement, name="updated displacement")
 updated_out_file = File(f"updated_out.pvd")
 def eval_cb(J, m):
-    log("Control", m.dat.data[:])
-    log("minimum Control", m.dat.data[:].min())
     log("J", J)
     circumference = 2 * pi * radius_values[0] 
     # Define the component terms of the overall objective functional
-    damping = assemble((normalised_ice_thickness.block_variable.checkpoint) ** 2 /circumference * ds)
-    smoothing = assemble(dot(grad(normalised_ice_thickness.block_variable.checkpoint), grad(normalised_ice_thickness.block_variable.checkpoint)) / circumference * ds)
+    damping = alpha_damping * assemble((normalised_ice_thickness.block_variable.checkpoint) ** 2 /circumference * ds(top_id))
+    smoothing = alpha_smoothing * assemble(dot(grad(normalised_ice_thickness.block_variable.checkpoint), grad(normalised_ice_thickness.block_variable.checkpoint)) / circumference * ds(top_id))
     log("damping", damping)
     log("smoothing", smoothing)
-    
+
+    # Write out values of control and final forward model results
     updated_ice_thickness.assign(m)
     updated_ice_thickness_file.write(updated_ice_thickness, target_normalised_ice_thickness)
     updated_displacement.interpolate(displacement.block_variable.checkpoint) 
     updated_out_file.write(updated_displacement, target_displacement)
-    #ice_thickness_checkpoint_file = f"updated-ice-thickness-iteration{c}.h5"
-    #with CheckpointFile(ice_thickness_checkpoint_file, "w") as checkpoint:
-    #    checkpoint.save_function(updated_ice_thickness, name="Updated ice thickness")
-    #c += 1
+
+
+
+Define reduced functional
+
 reduced_functional = ReducedFunctional(J, control, eval_cb_post=eval_cb)
+
+Good check that running the Forward model again using the reduced functional to check tape recorded everything accurately. 
 
 log("J", J)
 log("replay tape RF", reduced_functional(normalised_ice_thickness))
 
+# We can calculate the derivative and plot it.
+
+# +
+
+
 dJdm = reduced_functional.derivative()
 
+# plot derivative! 
 
+# +
+# some text about derivative...
+# -
+
+# A good way to verify this is correct is taylor test... 
+
+# +
 h = Function(normalised_ice_thickness)
 h.dat.data[:] = np.random.random(h.dat.data_ro.shape)
 
 taylor_test(reduced_functional, normalised_ice_thickness, h)
 
+# -
 
-# Perform a bounded nonlinear optimisation for the viscosity
-# is only permitted to lie in the range [1e19, 1e40...]
+# Now let's start inversion. first of all define some bounds. lower bound of zero is important. 
+
+# +
 ice_thickness_lb = Function(normalised_ice_thickness.function_space(), name="Lower bound ice thickness")
 ice_thickness_ub = Function(normalised_ice_thickness.function_space(), name="Upper bound ice thickness")
 ice_thickness_lb.assign(0.0)
 ice_thickness_ub.assign(5)
 
 bounds = [ice_thickness_lb, ice_thickness_ub]
-#minimize(reduced_functional, bounds=bounds, options={"disp": True})
+# -
+
+# setup a pyadjoint minimization problem
+
+# +
 
 minimisation_problem = MinimizationProblem(reduced_functional, bounds=bounds)
 minimisation_parameters["Step"]["Trust Region"]["Initial Radius"] = 1e4
 minimisation_parameters["Step"]["Trust Region"]["Maximum Radius"] = 1e30
+
 optimiser = LinMoreOptimiser(
     minimisation_problem,
     minimisation_parameters,
@@ -455,6 +489,9 @@ optimiser = LinMoreOptimiser(
 # Restart file for optimisation...
 updated_ice_thickness_file = File(f"update_ice_thickness.pvd")
 updated_out_file = File(f"updated_out.pvd")
+
+
+# +
 optimiser.run()
 
 # If we're performing mulitple successive optimisations, we want
@@ -463,6 +500,8 @@ optimiser.run()
 continue_annotation()
 
 # -
+
+# plot misfit results. plot final displacement at different iterations.
 
 # Looking at the animation, we can see that the weight of the ice load deforms the mantle, sinking beneath the ice load and pushing up material away from the ice load. This forebulge grows through the simulation and by 10,000 years is close to isostatic equilibrium. As the ice load is applied instantaneously the highest velocity occurs within the first timestep and gradually decays as the simulation goes on, though there is still a small amount of deformation ongoing after 10,000 years. We can also clearly see that the lateral viscosity variations give rise to assymetrical displacement patterns. This is especially true near the South Pole, where the low viscosity region has enabled the isostatic relaxation to happen much faster than the surrounding regions.
 
