@@ -713,6 +713,8 @@ plotter.close()
 
 # We can see that we have been able to recover two ice sheets in the correct locations and the final displacement pattern is very similar to the target run. We can confirm that the surface misfit has reduced by plotting the objective function at each iteration.
 
-plt.plot(J_list, '-x')
-plt.xlabel("Iteration number")
-plt.ylabel("Objective function")
+# + tags=["active-ipynb"]
+# plt.plot(J_list, '-x')
+# plt.xlabel("Iteration number")
+# plt.ylabel("Objective function")
+# -
