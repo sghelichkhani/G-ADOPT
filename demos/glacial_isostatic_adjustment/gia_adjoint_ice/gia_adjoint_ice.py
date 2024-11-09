@@ -58,7 +58,6 @@ stress_old = Function(S, name="stress_old").assign(0)
 
 # Let's set up the background profiles for the material properties with the same values as before.
 
-
 # +
 X = SpatialCoordinate(mesh)
 
