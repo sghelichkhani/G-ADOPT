@@ -642,15 +642,13 @@ J_list = []
 
 # Now let's run the inversion!
 
-# +
 optimiser.run()
 
 # If we're performing mulitple successive optimisations, we want
 # to ensure the annotations are switched back on for the next code
 # to use them
-continue_annotation()
 
-# -
+continue_annotation()
 
 # Let's plot the results of the inversion at the final iteration.
 
