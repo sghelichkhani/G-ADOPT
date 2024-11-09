@@ -295,9 +295,13 @@ log(f"Simulation start time: {Tstart} years")
 
 # Setup boundary conditions
 exterior_density = rho_ice * normalised_ice_thickness
-stokes_bcs = {top_id: {'normal_stress': ice_load, 'free_surface': {'delta_rho_fs': density - exterior_density}},
-              bottom_id: {'un': 0}
-              }
+stokes_bcs = {
+    top_id: {
+        'normal_stress': ice_load,
+        'free_surface': {'delta_rho_fs': density - exterior_density}
+    },
+    bottom_id: {'un': 0}
+}
 
 
 # We also need to specify a G-ADOPT approximation, nullspaces and finally the stokes solver as before.  For this tutorial we will use a direct solver for the matrix system, so we don't need to provide the near nullspace like before.
