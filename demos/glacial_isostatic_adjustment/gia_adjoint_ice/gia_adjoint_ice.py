@@ -1,7 +1,10 @@
 # Synthetic ice inversion using adjoints
 # =======================================================
 #
-# In this tutorial, we will use G-ADOPT's adjoint capability to invert for a synthetic ice load in an annulus domain. We will be running a 'twin' experiment where we will try to recover the ice load that we used as part of the earlier 2d cylindrical tutorial, starting from a different initial guess of the ice load.
+# In this tutorial, we will use G-ADOPT's adjoint capability to invert for a synthetic ice
+# load in an annulus domain. We will be running a 'twin' experiment where we will try to
+# recover the ice load that we used as part of the earlier 2d cylindrical tutorial,
+# starting from a different initial guess of the ice load.
 #
 # This example focusses on setting up an adjoint problem. These can be summarised as follows:
 # 1. Defining an objective function.
@@ -19,13 +22,17 @@ from gadopt.utility import step_func, vertical_component, CombinedSurfaceMeasure
 import matplotlib.pyplot as plt
 
 
-# To bring in G-ADOPT's adjoint functionality we need to start taping the forward problem, which we do below. It's also good practice to clear the tape, so that we are starting fresh each time.
+# To bring in G-ADOPT's adjoint functionality we need to start taping the forward problem,
+# which we do below. It's also good practice to clear the tape, so that we are starting
+# fresh each time.
 
 from gadopt.inverse import *
 tape = get_working_tape()
 tape.clear_tape()
 
-# In this tutorial we are going load the mesh created by the forward cylindrical demo in the previous tutorial. This makes it easier to load the synthetic data from the previous tutorial for our 'twin' experiment.
+# In this tutorial we are going load the mesh created by the forward cylindrical demo in the
+# previous tutorial. This makes it easier to load the synthetic data from the previous
+# tutorial for our 'twin' experiment.
 
 # Set up geometry:
 checkpoint_file = "./forward-2d-cylindrical-disp-incdisp-dt1ka.h5"
@@ -132,7 +139,10 @@ viscosity = Function(normalised_viscosity, name="viscosity").interpolate(1e23*10
 
 # -
 
-# Now let's setup the ice load. For this tutorial we will start with an ice thickness of zero everywhere, but our target ice load will be the same two synthetic ice sheets in the previous demo. An import step is to define our control, i.e. the thing that we are inverting for. In our case, this is the normalised ice thickness.
+# Now let's setup the ice load. For this tutorial we will start with an ice thickness of zero
+# everywhere, but our target ice load will be the same two synthetic ice sheets in the
+# previous demo. An import step is to define our control, i.e. the thing that we are inverting
+# for. In our case, this is the normalised ice thickness.
 
 # +
 rho_ice = 931
@@ -277,7 +287,8 @@ tape.add_block(DiagnosticBlock(adj_ice_file, normalised_ice_thickness, riesz_opt
 # plotter.close()
 # -
 
-# To make this simulation practical for a demo we are going to take longer timesteps than the previous 2d cylindrical demo. Let's choose a timestep (and output frequency) of 1000 years.
+# To make this simulation practical for a demo we are going to take longer timesteps than
+# the previous 2d cylindrical demo. Let's choose a timestep (and output frequency) of 1000 years.
 
 # +
 # Timestepping parameters
@@ -300,7 +311,9 @@ log(f"dt: {float(dt / year_in_seconds)} years")
 log(f"Simulation start time: {Tstart} years")
 # -
 
-# Similar to before, we setup the boundary conditions, this time using the normalised ice thickness to account for ice covered regions when calculating the density contrast across the free surface.
+# Similar to before, we setup the boundary conditions, this time using the normalised
+# ice thickness to account for ice covered regions when calculating the density
+# contrast across the free surface.
 
 # Setup boundary conditions
 exterior_density = rho_ice * normalised_ice_thickness
@@ -313,7 +326,9 @@ stokes_bcs = {
 }
 
 
-# We also need to specify a G-ADOPT approximation, nullspaces and finally the stokes solver as before.  For this tutorial we will use a direct solver for the matrix system, so we don't need to provide the near nullspace like before.
+# We also need to specify a G-ADOPT approximation, nullspaces and finally the
+# stokes solver as before.  For this tutorial we will use a direct solver for
+# the matrix system, so we don't need to provide the near nullspace like before.
 
 
 # +
@@ -351,7 +366,10 @@ U = FunctionSpace(mesh, "CG", 2)  # (Incremental) Displacement function space (s
 vertical_displacement = Function(U, name="Vertical displacement")
 # -
 
-# Now is a good time to setup a helper function for defining the time integrated misfit that we need later as part of our overall objective function. This is going to be called at each timestep of the forward run to calculate the difference between the displacement and velocity at the surface compared our reference forward simulation.
+# Now is a good time to setup a helper function for defining the time integrated misfit that we need
+# later as part of our overall objective function. This is going to be called at each timestep of
+# the forward run to calculate the difference between the displacement and velocity at the surface
+# compared our reference forward simulation.
 
 ds = CombinedSurfaceMeasure(mesh, degree=6)
 
@@ -373,7 +391,8 @@ def integrated_time_misfit(timestep, velocity_misfit, displacement_misfit):
     return velocity_misfit, displacement_misfit
 
 
-# Now let's run the simulation! This should be the same as before except we are calculating the surface misfit between our current simulation and the reference run at each timestep.
+# Now let's run the simulation! This should be the same as before except we are calculating the surface
+# misfit between our current simulation and the reference run at each timestep.
 
 # +
 velocity_misfit = 0
@@ -466,7 +485,11 @@ for timestep in range(max_timesteps+1):
 # Plotter.close()
 # -
 
-# Now we can define our overall objective function that we want to minimise. This includes the time integrated displacement and velocity misfit at the surface as we discussed above. It is also a good idea to add a smoothing and damping term to help regularise the inversion problem. Let's also pause annotation as we are now done with the forward terms.
+# Now we can define our overall objective function that we want to minimise.
+# This includes the time integrated displacement and velocity misfit at the
+# surface as we discussed above. It is also a good idea to add a smoothing
+# and damping term to help regularise the inversion problem. Let's also pause
+# annotation as we are now done with the forward terms.
 
 # +
 circumference = 2 * pi * radius_values[0]
@@ -524,22 +547,29 @@ def eval_cb(J, m):
 
 # -
 
-# The next important step is to define the reduced functional. This is pyadjoint's way of associating our objective function with the control variable that we are trying to optimise. We can pass our call back function which will be called every time the functional is evaluated.
-#
+# The next important step is to define the reduced functional. This is pyadjoint's way of
+# associating our objective function with the control variable that we are trying to
+# optimise. We can pass our call back function which will be called every time
+# the functional is evaluated.
 
 reduced_functional = ReducedFunctional(J, control, eval_cb_post=eval_cb)
 
-# A good check to see if the forward taping worked is to rerun the forward model based on the operations stored on the tape. We can do this by providing the control to the reducted functional and print out the answer - it is good to see they are the same!
+# A good check to see if the forward taping worked is to rerun the forward model based on
+# the operations stored on the tape. We can do this by providing the control to the
+# reducted functional and print out the answer - it is good to see they are the same!
 
 log("J", J)
 log("replay tape RF", reduced_functional(normalised_ice_thickness))
 
-# We can now calculate the derivative of our objective function with respect to the ice thickness.  This is as simple as calling the `derivative()` method on  our reduced functional.
+# We can now calculate the derivative of our objective function with respect to the
+# ice thickness.  This is as simple as calling the `derivative()` method on  our
+# reduced functional.
 
 dJdm = reduced_functional.derivative()
 
+# We can also plot the derivative using pyvista. First of all let's define another helper
+# function to plot the sensitivity to the ice thickness as a ring outside the domain.
 
-# We can also plot the derivative using pyvista. First of all let's define another helper function to plot the sensitivity to the ice thickness as a ring outside the domain.
 
 def add_sensitivity_ring(p, m, scalar_bar_args=None):
     # Make a colour map
@@ -572,7 +602,13 @@ def add_sensitivity_ring(p, m, scalar_bar_args=None):
     p.add_mesh(transformed_arc_data, line_width=8, scalar_bar_args=scalar_bar_args, clim=[-5e-6, 5e-6], cmap=adj_cmap)
 
 
-# Next we read in the file that was written out as part of the diagnostic callback added to the tape earlier. We can see there is a clear hemispherical pattern in the gradients. Red indicates that increasing the ice thickness here would increase out objective function and blue areas indicates that increasing the ice thickness here would decrease our objective function. In the 'southern' hemisphere where we have the biggest ice load the gradient is negative, which makes sense as we expect increasing the ice thickness here to reduce our surface misfit.
+# Next we read in the file that was written out as part of the diagnostic callback
+# added to the tape earlier. We can see there is a clear hemispherical pattern in
+# the gradients. Red indicates that increasing the ice thickness here would increase
+# out objective function and blue areas indicates that increasing the ice thickness
+# here would decrease our objective function. In the 'southern' hemisphere
+# where we have the biggest ice load the gradient is negative, which makes sense as
+# we expect increasing the ice thickness here to reduce our surface misfit.
 
 # + tags=["active-ipynb"]
 # # Read the PVD file
@@ -595,22 +631,29 @@ def add_sensitivity_ring(p, m, scalar_bar_args=None):
 # plotter.close()
 # -
 
-# A good way to verify this the gradient is correct is to carry out a Taylor test. For the control, $I_h$,  reduced functional, $J(I_h)$, and its derivative,
+# A good way to verify this the gradient is correct is to carry out a Taylor test. For the control, $I_h$,
+# reduced functional, $J(I_h)$, and its derivative,
 # $\frac{\mathrm{d} J}{\mathrm{d} I_h}$, the Taylor remainder convergence test can be expressed as:
 #
 # $$ \left| J(I_h + h \,\delta I_h) - J(I_h) - h\,\frac{\mathrm{d} J}{\mathrm{d} I_h} \cdot \delta I_h \right| \longrightarrow 0 \text{ at } O(h^2). $$
 #
-# The expression on the left-hand side is termed the second-order Taylor remainder. This term's convergence rate of $O(h^2)$ is a robust indicator for
-# verifying the computational implementation of the gradient calculation. Essentially, if you halve the value of $h$, the magnitude
+# The expression on the left-hand side is termed the second-order Taylor remainder. i
+# This term's convergence rate of $O(h^2)$ is a robust indicator for
+# verifying the computational implementation of the gradient calculation.
+# Essentially, if you halve the value of $h$, the magnitude
 # of the second-order Taylor remainder should decrease by a factor of 4.
 #
-# We employ these so-called *Taylor tests* to confirm the accuracy of the determined gradients. The theoretical convergence rate is
-# $O(2.0)$, and achieving this rate indicates that the gradient information is accurate down to floating-point precision.
+# We employ these so-called *Taylor tests* to confirm the accuracy of the
+# determined gradients. The theoretical convergence rate is
+# $O(2.0)$, and achieving this rate indicates that the gradient information
+# is accurate down to floating-point precision.
 #
 # ### Performing Taylor Tests
 #
-# In our implementation, we perform a second-order Taylor remainder test for each term of the objective functional. The test involves
-# computing the functional and the associated gradient when randomly perturbing the initial temperature field, $T_{ic}$, and subsequently
+# In our implementation, we perform a second-order Taylor remainder test for each
+# term of the objective functional. The test involves
+# computing the functional and the associated gradient when randomly perturbing
+# the initial temperature field, $T_{ic}$, and subsequently
 # halving the perturbations at each level.
 #
 # Here is how you can perform a Taylor test in the code:
@@ -619,7 +662,10 @@ h = Function(normalised_ice_thickness)
 h.dat.data[:] = np.random.random(h.dat.data_ro.shape)
 taylor_test(reduced_functional, normalised_ice_thickness, h)
 
-# Now that we have verified our gradient is correct, let's start setting up an inversion. First of all we will define some bounds that we enforce the control to lie within. For this problem the lower bound of zero ice thickness is particularly important, as we do not want negative ice thicknesses!
+# Now that we have verified our gradient is correct, let's start setting up an inversion.
+# First of all we will define some bounds that we enforce the control to lie within.
+# For this problem the lower bound of zero ice thickness is particularly important,
+# as we do not want negative ice thicknesses!
 
 # +
 ice_thickness_lb = Function(normalised_ice_thickness.function_space(), name="Lower bound ice thickness")
@@ -630,7 +676,11 @@ ice_thickness_ub.assign(5)
 bounds = [ice_thickness_lb, ice_thickness_ub]
 # -
 
-# Next we setup a pyadjoint minimization problem. We tweak GADOPT's default minimisation parameters (found in `gadopt/inverse.py`) for our problem. We limit the number of iterations to 20 just so that the demo is quick to run. We also increase the size of the initial radius of the trust region so that the inversion gets going a bit quicker than the default setting.
+# Next we setup a pyadjoint minimization problem. We tweak GADOPT's default minimisation
+# parameters (found in `gadopt/inverse.py`) for our problem. We limit the number of
+# iterations to 20 just so that the demo is quick to run. We also increase the size of
+# the initial radius of the trust region so that the inversion gets going a bit quicker
+# than the default setting.
 
 # +
 minimisation_problem = MinimizationProblem(reduced_functional, bounds=bounds)
@@ -721,7 +771,9 @@ continue_annotation()
 # plotter.close()
 # -
 
-# We can see that we have been able to recover two ice sheets in the correct locations and the final displacement pattern is very similar to the target run. We can confirm that the surface misfit has reduced by plotting the objective function at each iteration.
+# We can see that we have been able to recover two ice sheets in the correct locations and
+# the final displacement pattern is very similar to the target run. We can confirm that
+# the surface misfit has reduced by plotting the objective function at each iteration.
 
 # + tags=["active-ipynb"]
 # plt.plot(J_list, '-x')
