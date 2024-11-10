@@ -16,7 +16,6 @@
 
 from gadopt import *
 from gadopt.utility import step_func, vertical_component, CombinedSurfaceMeasure
-import pyvista as pv
 import matplotlib.pyplot as plt
 
 
@@ -164,107 +163,118 @@ control = Control(normalised_ice_thickness)
 ice_load = rho_ice * g * Hice1 * normalised_ice_thickness
 
 adj_ice_file = VTKFile("adj_ice.pvd")
+# Since we are calculating the sensitivity to a field that is only defined
+# on the top boundary if we do the usual L2 projection (using the
+# mass matrix) to account for the size of the mesh element then we
+# will get spurious oscillating values in the output gradient in
+# cells not connected to the boundary. Instead we do the projection using
+# a surface integral, so that our output gradient accounts for the surface
+# area of each cell.
 converter = RieszL2BoundaryRepresentation(W, top_id)  # convert to surface L2 representation
+
+# We add a diagnostic block to the tape which will output the gradient
+# field every time the tape is replayed.
 tape.add_block(DiagnosticBlock(adj_ice_file, normalised_ice_thickness, riesz_options={'riesz_representation': converter}))
 # -
 
 
 # Let's visualise the ice thickness using pyvista, by plotting a ring outside our synthetic Earth.
 
-# +
-ice_cmap = plt.get_cmap("Blues", 25)
-
-# Make two points at the bounds of the mesh and one at the center to
-# construct a circular arc.
-rmin = 3480e3
-rmax = 6371e3
-D = rmax-rmin
-nz = 32
-dz = D / nz
-
-normal = [0, 0, 1]
-polar = [radius_values[0]-dz/2, 0, 0]
-center = [0, 0, 0]
-angle = 360.0
-arc = pv.CircularArcFromNormal(center, 500, normal, polar, angle)
-
+# + tags=["active-ipynb"]
+# import pyvista as pv
+# ice_cmap = plt.get_cmap("Blues", 25)
+#
+# # Make two points at the bounds of the mesh and one at the center to
+# # construct a circular arc.
+# rmin = 3480e3
+# rmax = 6371e3
+# D = rmax-rmin
+# nz = 32
+# dz = D / nz
+#
+# normal = [0, 0, 1]
+# polar = [radius_values[0]-dz/2, 0, 0]
+# center = [0, 0, 0]
+# angle = 360.0
+# arc = pv.CircularArcFromNormal(center, 500, normal, polar, angle)
+#
 # Stretch line by 20%
-transform_matrix = np.array(
-    [
-        [1.2, 0, 0, 0],
-        [0, 1.2, 0, 0],
-        [0, 0, 1.2, 0],
-        [0, 0, 0, 1],
-    ])
-
-
-def add_ice(p, m, scalar="normalised ice thickness", scalar_bar_args=None):
-
-    if scalar_bar_args is None:
-        scalar_bar_args = {
-            "title": 'Normalised ice thickness',
-            "position_x": 0.2,
-            "position_y": 0.8,
-            "vertical": False,
-            "title_font_size": 22,
-            "label_font_size": 18,
-            "fmt": "%.1f",
-            "font_family": "arial",
-            "n_labels": 5,
-        }
-    data = m.read()[0]  # MultiBlock mesh with only 1 block
-
-    arc_data = arc.sample(data)
-
-    transformed_arc_data = arc_data.transform(transform_matrix)
-    p.add_mesh(transformed_arc_data, scalars=scalar, line_width=10, clim=[0, 2], cmap=ice_cmap, scalar_bar_args=scalar_bar_args)
-
-
-visc_file = VTKFile('viscosity.pvd').write(normalised_viscosity)
-reader = pv.get_reader("viscosity.pvd")
-visc_data = reader.read()[0]  # MultiBlock mesh with only 1 block
-visc_cmap = plt.get_cmap("inferno_r", 25)
-
-
-def add_viscosity(p):
-    p.add_mesh(
-        visc_data,
-        component=None,
-        lighting=False,
-        show_edges=False,
-        cmap=visc_cmap,
-        clim=[-3, 2],
-        scalar_bar_args={
-            "title": 'Normalised viscosity',
-            "position_x": 0.2,
-            "position_y": 0.1,
-            "vertical": False,
-            "title_font_size": 22,
-            "label_font_size": 18,
-            "fmt": "%.0f",
-            "font_family": "arial",
-        }
-    )
-
-
-# Read the PVD file
-updated_ice_file = VTKFile('ice.pvd').write(normalised_ice_thickness, target_normalised_ice_thickness)
-reader = pv.get_reader("ice.pvd")
-
-# Create a plotter object
-plotter = pv.Plotter(shape=(1, 2), border=False, notebook=True, off_screen=False)
-plotter.subplot(0, 0)
-add_ice(plotter, reader, 'target normalised ice thickness')
-add_viscosity(plotter)
-plotter.camera_position = 'xy'
-plotter.subplot(0, 1)
-add_ice(plotter, reader, 'normalised ice thickness')
-add_viscosity(plotter)
-
-plotter.camera_position = 'xy'
-plotter.show(jupyter_backend="static", interactive=False)
-# Closes and finalizes movie
-plotter.close()
+# transform_matrix = np.array(
+#     [
+#         [1.2, 0, 0, 0],
+#         [0, 1.2, 0, 0],
+#         [0, 0, 1.2, 0],
+#         [0, 0, 0, 1],
+#     ])
+#
+#
+# def add_ice(p, m, scalar="normalised ice thickness", scalar_bar_args=None):
+#
+#     if scalar_bar_args is None:
+#         scalar_bar_args = {
+#             "title": 'Normalised ice thickness',
+#             "position_x": 0.2,
+#             "position_y": 0.8,
+#             "vertical": False,
+#             "title_font_size": 22,
+#             "label_font_size": 18,
+#             "fmt": "%.1f",
+#             "font_family": "arial",
+#             "n_labels": 5,
+#         }
+#     data = m.read()[0]  # MultiBlock mesh with only 1 block
+#
+#     arc_data = arc.sample(data)
+#
+#     transformed_arc_data = arc_data.transform(transform_matrix)
+#     p.add_mesh(transformed_arc_data, scalars=scalar, line_width=10, clim=[0, 2], cmap=ice_cmap, scalar_bar_args=scalar_bar_args)
+#
+#
+# visc_file = VTKFile('viscosity.pvd').write(normalised_viscosity)
+# reader = pv.get_reader("viscosity.pvd")
+# visc_data = reader.read()[0]  # MultiBlock mesh with only 1 block
+# visc_cmap = plt.get_cmap("inferno_r", 25)
+#
+#
+# def add_viscosity(p):
+#     p.add_mesh(
+#         visc_data,
+#         component=None,
+#         lighting=False,
+#         show_edges=False,
+#         cmap=visc_cmap,
+#         clim=[-3, 2],
+#         scalar_bar_args={
+#             "title": 'Normalised viscosity',
+#             "position_x": 0.2,
+#             "position_y": 0.1,
+#             "vertical": False,
+#             "title_font_size": 22,
+#             "label_font_size": 18,
+#             "fmt": "%.0f",
+#             "font_family": "arial",
+#         }
+#     )
+#
+#
+# # Read the PVD file
+# updated_ice_file = VTKFile('ice.pvd').write(normalised_ice_thickness, target_normalised_ice_thickness)
+# reader = pv.get_reader("ice.pvd")
+#
+# # Create a plotter object
+# plotter = pv.Plotter(shape=(1, 2), border=False, notebook=True, off_screen=False)
+# plotter.subplot(0, 0)
+# add_ice(plotter, reader, 'target normalised ice thickness')
+# add_viscosity(plotter)
+# plotter.camera_position = 'xy'
+# plotter.subplot(0, 1)
+# add_ice(plotter, reader, 'normalised ice thickness')
+# add_viscosity(plotter)
+#
+# plotter.camera_position = 'xy'
+# plotter.show(jupyter_backend="static", interactive=False)
+# # Closes and finalizes movie
+# plotter.close()
 # -
 
 # To make this simulation practical for a demo we are going to take longer timesteps than the previous 2d cylindrical demo. Let's choose a timestep (and output frequency) of 1000 years.
@@ -399,61 +409,61 @@ for timestep in range(max_timesteps+1):
 
 # As we can see from the plot below there is no displacement at the final time given there is no ice load!
 
-# +
+# + tags=["active-ipynb"]
 # Read the PVD file
-reader = pv.get_reader("output.pvd")
-data = reader.read()[0]  # MultiBlock mesh with only 1 block
-
-# Create a plotter object
-plotter = pv.Plotter(shape=(1, 1), border=False, notebook=True, off_screen=False)
-
-# Make a colour map
-boring_cmap = plt.get_cmap("inferno_r", 25)
-
-# Read last timestep
-reader.set_active_time_point(10)
-data = reader.read()[0]
-# Artificially warp the output data in the vertical direction by the free surface height
-# Note the mesh is not really moving!
-warped = data.warp_by_vector(vectors="displacement", factor=1500)
-arrows = warped.glyph(orient="velocity", scale="velocity", factor=1e14, tolerance=0.01)
-# Add the warped displacement field to the frame
-plotter.add_mesh(
-    warped,
-    scalars="displacement",
-    component=None,
-    lighting=False,
-    clim=[0, 600],
-    cmap=boring_cmap,
-    scalar_bar_args={
-        "title": 'Displacement (m)',
-        "position_x": 0.85,
-        "position_y": 0.3,
-        "vertical": True,
-        "title_font_size": 20,
-        "label_font_size": 16,
-        "fmt": "%.0f",
-        "font_family": "arial",
-    }
-)
-
-ice_scalar_bar_args = {"title": 'Normalised ice thickness',
-                       "position_x": 0.1,
-                       "position_y": 0.3,
-                       "vertical": True,
-                       "title_font_size": 22,
-                       "label_font_size": 18,
-                       "fmt": "%.1f",
-                       "font_family": "arial",
-                       "n_labels": 5,
-                       }
-
-reader = pv.get_reader("ice.pvd")
-add_ice(plotter, reader, 'normalised ice thickness', scalar_bar_args=ice_scalar_bar_args)
-plotter.camera_position = 'xy'
-plotter.show(jupyter_backend="static", interactive=False)
-# Closes and finalizes movie
-plotter.close()
+# Reader = pv.get_reader("output.pvd")
+# Data = reader.read()[0]  # MultiBlock mesh with only 1 block
+#
+# # Create a plotter object
+# Plotter = pv.Plotter(shape=(1, 1), border=False, notebook=True, off_screen=False)
+#
+# # Make a colour map
+# Boring_cmap = plt.get_cmap("inferno_r", 25)
+#
+# # Read last timestep
+# Reader.set_active_time_point(10)
+# Data = reader.read()[0]
+# # Artificially warp the output data in the vertical direction by the free surface height
+# # Note the mesh is not really moving!
+# Warped = data.warp_by_vector(vectors="displacement", factor=1500)
+# Arrows = warped.glyph(orient="velocity", scale="velocity", factor=1e14, tolerance=0.01)
+# # Add the warped displacement field to the frame
+# Plotter.add_mesh(
+#     warped,
+#     scalars="displacement",
+#     component=None,
+#     lighting=False,
+#     clim=[0, 600],
+#     cmap=boring_cmap,
+#     scalar_bar_args={
+#         "title": 'Displacement (m)',
+#         "position_x": 0.85,
+#         "position_y": 0.3,
+#         "vertical": True,
+#         "title_font_size": 20,
+#         "label_font_size": 16,
+#         "fmt": "%.0f",
+#         "font_family": "arial",
+#     }
+# )
+#
+# Ice_scalar_bar_args = {"title": 'Normalised ice thickness',
+#                        "position_x": 0.1,
+#                        "position_y": 0.3,
+#                        "vertical": True,
+#                        "title_font_size": 22,
+#                        "label_font_size": 18,
+#                        "fmt": "%.1f",
+#                        "font_family": "arial",
+#                        "n_labels": 5,
+#                        }
+#
+# Reader = pv.get_reader("ice.pvd")
+# Add_ice(plotter, reader, 'normalised ice thickness', scalar_bar_args=ice_scalar_bar_args)
+# Plotter.camera_position = 'xy'
+# Plotter.show(jupyter_backend="static", interactive=False)
+# # Closes and finalizes movie
+# Plotter.close()
 # -
 
 # Now we can define our overall objective function that we want to minimise. This includes the time integrated displacement and velocity misfit at the surface as we discussed above. It is also a good idea to add a smoothing and damping term to help regularise the inversion problem. Let's also pause annotation as we are now done with the forward terms.
@@ -564,25 +574,25 @@ def add_sensitivity_ring(p, m, scalar_bar_args=None):
 
 # Next we read in the file that was written out as part of the diagnostic callback added to the tape earlier. We can see there is a clear hemispherical pattern in the gradients. Red indicates that increasing the ice thickness here would increase out objective function and blue areas indicates that increasing the ice thickness here would decrease our objective function. In the 'southern' hemisphere where we have the biggest ice load the gradient is negative, which makes sense as we expect increasing the ice thickness here to reduce our surface misfit.
 
-# +
-# Read the PVD file
-reader = pv.get_reader("ice.pvd")
-adj_reader = pv.get_reader("adj_ice.pvd")
-# Create a plotter object
-plotter = pv.Plotter(shape=(1, 2), border=False, notebook=True, off_screen=False)
-plotter.subplot(0, 0)
-add_ice(plotter, reader, 'target normalised ice thickness')
-add_viscosity(plotter)
-plotter.camera_position = 'xy'
-plotter.subplot(0, 1)
-add_ice(plotter, reader, 'normalised ice thickness')
-add_viscosity(plotter)
-
-add_sensitivity_ring(plotter, adj_reader)
-plotter.camera_position = 'xy'
-plotter.show(jupyter_backend="static", interactive=False)
-# Closes and finalizes movie
-plotter.close()
+# + tags=["active-ipynb"]
+# # Read the PVD file
+# reader = pv.get_reader("ice.pvd")
+# adj_reader = pv.get_reader("adj_ice.pvd")
+# # Create a plotter object
+# plotter = pv.Plotter(shape=(1, 2), border=False, notebook=True, off_screen=False)
+# plotter.subplot(0, 0)
+# add_ice(plotter, reader, 'target normalised ice thickness')
+# add_viscosity(plotter)
+# plotter.camera_position = 'xy'
+# plotter.subplot(0, 1)
+# add_ice(plotter, reader, 'normalised ice thickness')
+# add_viscosity(plotter)
+#
+# add_sensitivity_ring(plotter, adj_reader)
+# plotter.camera_position = 'xy'
+# plotter.show(jupyter_backend="static", interactive=False)
+# # Closes and finalizes movie
+# plotter.close()
 # -
 
 # A good way to verify this the gradient is correct is to carry out a Taylor test. For the control, $I_h$,  reduced functional, $J(I_h)$, and its derivative,
@@ -652,63 +662,63 @@ continue_annotation()
 
 # Let's plot the results of the inversion at the final iteration.
 
-# +
-# Read the PVD file
-reader = pv.get_reader("updated_out.pvd")
-data = reader.read()[0]  # MultiBlock mesh with only 1 block
-
-# Create a plotter object
-plotter = pv.Plotter(shape=(1, 1), border=False, notebook=True, off_screen=False)
-
-# Make a colour map
-boring_cmap = plt.get_cmap("inferno_r", 25)
-
-# Read last timestep
-reader.set_active_time_point(20)
-data = reader.read()[0]
-# Artificially warp the output data by the displacement field
-# Note the mesh is not really moving!
-warped = data.warp_by_vector(vectors="updated displacement", factor=1500)
-arrows = warped.glyph(orient="updated velocity", scale="updated velocity", factor=1e14, tolerance=0.01)
-# Add the warped displacement field to the frame
-plotter.add_mesh(
-    warped,
-    scalars="updated displacement",
-    component=None,
-    lighting=False,
-    clim=[0, 600],
-    cmap=boring_cmap,
-    scalar_bar_args={
-        "title": 'Displacement (m)',
-        "position_x": 0.85,
-        "position_y": 0.3,
-        "vertical": True,
-        "title_font_size": 20,
-        "label_font_size": 16,
-        "fmt": "%.0f",
-        "font_family": "arial",
-    }
-)
-
-ice_scalar_bar_args = {"title": 'Normalised ice thickness',
-                       "position_x": 0.1,
-                       "position_y": 0.3,
-                       "vertical": True,
-                       "title_font_size": 22,
-                       "label_font_size": 18,
-                       "fmt": "%.1f",
-                       "font_family": "arial",
-                       "n_labels": 5,
-                       }
-
-reader = pv.get_reader("update_ice_thickness.pvd")
-reader.set_active_time_point(20)
-add_ice(plotter, reader, 'updated ice thickness', scalar_bar_args=ice_scalar_bar_args)
-
-plotter.camera_position = 'xy'
-plotter.show(jupyter_backend="static", interactive=False)
-# Closes and finalizes movie
-plotter.close()
+# + tags=["active-ipynb"]
+# # Read the PVD file
+# reader = pv.get_reader("updated_out.pvd")
+# data = reader.read()[0]  # MultiBlock mesh with only 1 block
+#
+# # Create a plotter object
+# plotter = pv.Plotter(shape=(1, 1), border=False, notebook=True, off_screen=False)
+#
+# # Make a colour map
+# boring_cmap = plt.get_cmap("inferno_r", 25)
+#
+# # Read last timestep
+# reader.set_active_time_point(20)
+# data = reader.read()[0]
+# # Artificially warp the output data by the displacement field
+# # Note the mesh is not really moving!
+# warped = data.warp_by_vector(vectors="updated displacement", factor=1500)
+# arrows = warped.glyph(orient="updated velocity", scale="updated velocity", factor=1e14, tolerance=0.01)
+# # Add the warped displacement field to the frame
+# plotter.add_mesh(
+#     warped,
+#     scalars="updated displacement",
+#     component=None,
+#     lighting=False,
+#     clim=[0, 600],
+#     cmap=boring_cmap,
+#     scalar_bar_args={
+#         "title": 'Displacement (m)',
+#         "position_x": 0.85,
+#         "position_y": 0.3,
+#         "vertical": True,
+#         "title_font_size": 20,
+#         "label_font_size": 16,
+#         "fmt": "%.0f",
+#         "font_family": "arial",
+#     }
+# )
+#
+# ice_scalar_bar_args = {"title": 'Normalised ice thickness',
+#                        "position_x": 0.1,
+#                        "position_y": 0.3,
+#                        "vertical": True,
+#                        "title_font_size": 22,
+#                        "label_font_size": 18,
+#                        "fmt": "%.1f",
+#                        "font_family": "arial",
+#                        "n_labels": 5,
+#                        }
+#
+# reader = pv.get_reader("update_ice_thickness.pvd")
+# reader.set_active_time_point(20)
+# add_ice(plotter, reader, 'updated ice thickness', scalar_bar_args=ice_scalar_bar_args)
+#
+# plotter.camera_position = 'xy'
+# plotter.show(jupyter_backend="static", interactive=False)
+# # Closes and finalizes movie
+# plotter.close()
 # -
 
 # We can see that we have been able to recover two ice sheets in the correct locations and the final displacement pattern is very similar to the target run. We can confirm that the surface misfit has reduced by plotting the objective function at each iteration.
