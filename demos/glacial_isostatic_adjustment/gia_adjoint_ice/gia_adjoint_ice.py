@@ -34,8 +34,15 @@ tape.clear_tape()
 # previous tutorial. This makes it easier to load the synthetic data from the previous
 # tutorial for our 'twin' experiment.
 
+# Let's download a checkpoint file we made earlier. This is the same as the forward cylindrical demo except
+# with a longer timestep of 1000 years.
+
+# + tags=["active-ipynb"]
+# ![ ! -f forward-2d-cylindrical-disp-incdisp-dt1ka.h5 ] && wget https://data.gadopt.org/demos/forward-2d-cylindrical-disp-incdisp-dt1ka.h5
+# -
+
 # Set up geometry:
-checkpoint_file = "./forward-2d-cylindrical-disp-incdisp-dt1ka.h5"
+checkpoint_file = "forward-2d-cylindrical-disp-incdisp-dt1ka.h5"
 with CheckpointFile(checkpoint_file, 'r') as afile:
     mesh = afile.load_mesh(name='surface_mesh_extruded')
 bottom_id, top_id = "bottom", "top"
