@@ -168,7 +168,6 @@ target_normalised_ice_thickness.interpolate(disc1 + (Hice2/Hice1)*disc2)
 
 normalised_ice_thickness = Function(W, name="normalised ice thickness")
 
-
 control = Control(normalised_ice_thickness)
 ice_load = rho_ice * g * Hice1 * normalised_ice_thickness
 
@@ -206,9 +205,9 @@ tape.add_block(DiagnosticBlock(adj_ice_file, normalised_ice_thickness, riesz_opt
 # polar = [radius_values[0]-dz/2, 0, 0]
 # center = [0, 0, 0]
 # angle = 360.0
-# arc = pv.CircularArcFromNormal(center, 500, normal, polar, angle)
+# arc = pv.CircularArcFromNormal(center, 10000, normal, polar, angle)
 #
-# Stretch line by 20%
+# # Stretch line by 20%
 # transform_matrix = np.array(
 #     [
 #         [1.2, 0, 0, 0],
@@ -364,6 +363,8 @@ gd = GeodynamicalDiagnostics(z, density, bottom_id, top_id)
 # Initialise a (scalar!) function for logging vertical displacement
 U = FunctionSpace(mesh, "CG", 2)  # (Incremental) Displacement function space (scalar)
 vertical_displacement = Function(U, name="Vertical displacement")
+
+
 # -
 
 # Now is a good time to setup a helper function for defining the time integrated misfit that we need
@@ -371,9 +372,7 @@ vertical_displacement = Function(U, name="Vertical displacement")
 # the forward run to calculate the difference between the displacement and velocity at the surface
 # compared our reference forward simulation.
 
-ds = CombinedSurfaceMeasure(mesh, degree=6)
-
-
+# +
 def integrated_time_misfit(timestep, velocity_misfit, displacement_misfit):
     with CheckpointFile(checkpoint_file, 'r') as afile:
         target_incremental_displacement = afile.load_function(mesh, name="Incremental Displacement", idx=timestep)
@@ -390,6 +389,10 @@ def integrated_time_misfit(timestep, velocity_misfit, displacement_misfit):
     displacement_misfit += assemble(dot(displacement_error, displacement_error) / (circumference * displacement_scale**2) * ds(top_id))
     return velocity_misfit, displacement_misfit
 
+
+# Overload surface integral measure for G-ADOPT's extruded meshes.
+ds = CombinedSurfaceMeasure(mesh, degree=6)
+# -
 
 # Now let's run the simulation! This should be the same as before except we are calculating the surface
 # misfit between our current simulation and the reference run at each timestep.
@@ -429,25 +432,25 @@ for timestep in range(max_timesteps+1):
 # As we can see from the plot below there is no displacement at the final time given there is no ice load!
 
 # + tags=["active-ipynb"]
-# Read the PVD file
-# Reader = pv.get_reader("output.pvd")
-# Data = reader.read()[0]  # MultiBlock mesh with only 1 block
+# # Read the PVD file
+# reader = pv.get_reader("output.pvd")
+# data = reader.read()[0]  # MultiBlock mesh with only 1 block
 #
 # # Create a plotter object
-# Plotter = pv.Plotter(shape=(1, 1), border=False, notebook=True, off_screen=False)
+# plotter = pv.Plotter(shape=(1, 1), border=False, notebook=True, off_screen=False)
 #
 # # Make a colour map
-# Boring_cmap = plt.get_cmap("inferno_r", 25)
+# boring_cmap = plt.get_cmap("inferno_r", 25)
 #
 # # Read last timestep
-# Reader.set_active_time_point(10)
-# Data = reader.read()[0]
+# reader.set_active_time_point(10)
+# data = reader.read()[0]
 # # Artificially warp the output data in the vertical direction by the free surface height
 # # Note the mesh is not really moving!
-# Warped = data.warp_by_vector(vectors="displacement", factor=1500)
-# Arrows = warped.glyph(orient="velocity", scale="velocity", factor=1e14, tolerance=0.01)
+# warped = data.warp_by_vector(vectors="displacement", factor=1500)
+# arrows = warped.glyph(orient="velocity", scale="velocity", factor=1e14, tolerance=0.01)
 # # Add the warped displacement field to the frame
-# Plotter.add_mesh(
+# plotter.add_mesh(
 #     warped,
 #     scalars="displacement",
 #     component=None,
@@ -466,7 +469,7 @@ for timestep in range(max_timesteps+1):
 #     }
 # )
 #
-# Ice_scalar_bar_args = {"title": 'Normalised ice thickness',
+# ice_scalar_bar_args = {"title": 'Normalised ice thickness',
 #                        "position_x": 0.1,
 #                        "position_y": 0.3,
 #                        "vertical": True,
@@ -477,41 +480,42 @@ for timestep in range(max_timesteps+1):
 #                        "n_labels": 5,
 #                        }
 #
-# Reader = pv.get_reader("ice.pvd")
-# Add_ice(plotter, reader, 'normalised ice thickness', scalar_bar_args=ice_scalar_bar_args)
-# Plotter.camera_position = 'xy'
-# Plotter.show(jupyter_backend="static", interactive=False)
+# reader = pv.get_reader("ice.pvd")
+# add_ice(plotter, reader, 'normalised ice thickness', scalar_bar_args=ice_scalar_bar_args)
+# plotter.camera_position = 'xy'
+# plotter.show(jupyter_backend="static", interactive=False)
 # # Closes and finalizes movie
-# Plotter.close()
+# plotter.close()
 # -
 
 # Now we can define our overall objective function that we want to minimise.
 # This includes the time integrated displacement and velocity misfit at the
 # surface as we discussed above. It is also a good idea to add a smoothing
-# and damping term to help regularise the inversion problem. Let's also pause
-# annotation as we are now done with the forward terms.
+# and damping term to help regularise the inversion problem.
 
 # +
 circumference = 2 * pi * radius_values[0]
 
-alpha_smoothing = 1e5
+alpha_smoothing = 1
 alpha_damping = 0.1
 damping = assemble((normalised_ice_thickness) ** 2 / circumference * ds(top_id))
 smoothing = assemble(dot(grad(normalised_ice_thickness), grad(normalised_ice_thickness)) / circumference * ds(top_id))
 
 J = (displacement_misfit + velocity_misfit) / max_timesteps + alpha_damping * damping + alpha_smoothing * smoothing
 log("J = ", J)
-
-# All done with the forward run, stop annotating anything else to the tape
-pause_annotation()
 # -
 
+
+# Let's also pause
+# annotation as we are now done with the forward terms.
+
+pause_annotation()
 
 # Let's setup some call backs to help us keep track of the inversion.
 
 # +
 updated_ice_thickness = Function(normalised_ice_thickness, name="updated ice thickness")
-updated_ice_thickness_file = VTKFile("update_ice_thickness_dispvelmisfit.pvd")
+updated_ice_thickness_file = VTKFile("updated_ice_thickness.pvd")
 updated_displacement = Function(displacement, name="updated displacement")
 updated_velocity = Function(z.subfunctions[0], name="updated velocity")
 updated_out_file = VTKFile("updated_out.pvd")
@@ -521,12 +525,15 @@ with CheckpointFile(checkpoint_file, 'r') as afile:
     final_target_displacement = afile.load_function(mesh, name="Displacement", idx=10)
 
 final_target_velocity = Function(V, name="target velocity").interpolate(final_target_incremental_displacement / dt_years)
-J_list = []
+functional_values = []
 
 
 def eval_cb(J, m):
-    log("J", J)
-    J_list.append(J)
+    if functional_values:
+        functional_values.append(min(J, min(functional_values)))
+    else:
+        functional_values.append(J)
+
     circumference = 2 * pi * radius_values[0]
     # Define the component terms of the overall objective functional
     log("displacement misfit", displacement_misfit.block_variable.checkpoint / max_timesteps)
@@ -599,7 +606,7 @@ def add_sensitivity_ring(p, m, scalar_bar_args=None):
         ])
 
     transformed_arc_data = arc_data.transform(transform_matrix)
-    p.add_mesh(transformed_arc_data, line_width=8, scalar_bar_args=scalar_bar_args, clim=[-5e-6, 5e-6], cmap=adj_cmap)
+    p.add_mesh(transformed_arc_data, line_width=8, scalar_bar_args=scalar_bar_args, clim=[-5e-7, 5e-7], cmap=adj_cmap)
 
 
 # Next we read in the file that was written out as part of the diagnostic callback
@@ -678,14 +685,14 @@ bounds = [ice_thickness_lb, ice_thickness_ub]
 
 # Next we setup a pyadjoint minimization problem. We tweak GADOPT's default minimisation
 # parameters (found in `gadopt/inverse.py`) for our problem. We limit the number of
-# iterations to 20 just so that the demo is quick to run. We also increase the size of
+# iterations to 15 just so that the demo is quick to run. We also increase the size of
 # the initial radius of the trust region so that the inversion gets going a bit quicker
 # than the default setting.
 
 # +
 minimisation_problem = MinimizationProblem(reduced_functional, bounds=bounds)
 
-minimisation_parameters["Status Test"]["Iteration Limit"] = 20
+minimisation_parameters["Status Test"]["Iteration Limit"] = 15
 minimisation_parameters["Step"]["Trust Region"]["Initial Radius"] = 1e4
 
 optimiser = LinMoreOptimiser(
@@ -694,9 +701,9 @@ optimiser = LinMoreOptimiser(
     checkpoint_dir="optimisation_checkpoint",
 )
 # Restart file for optimisation...
-updated_ice_thickness_file = VTKFile("update_ice_thickness_dispvel1.pvd")
+updated_ice_thickness_file = VTKFile("updated_ice_thickness.pvd")
 updated_out_file = VTKFile("updated_out.pvd")
-J_list = []
+functional_values = []
 # -
 
 
@@ -724,7 +731,7 @@ continue_annotation()
 # boring_cmap = plt.get_cmap("inferno_r", 25)
 #
 # # Read last timestep
-# reader.set_active_time_point(20)
+# reader.set_active_time_point(15)
 # data = reader.read()[0]
 # # Artificially warp the output data by the displacement field
 # # Note the mesh is not really moving!
@@ -761,10 +768,25 @@ continue_annotation()
 #                        "n_labels": 5,
 #                        }
 #
-# reader = pv.get_reader("update_ice_thickness.pvd")
-# reader.set_active_time_point(20)
+# reader = pv.get_reader("updated_ice_thickness.pvd")
+# reader.set_active_time_point(15)
 # add_ice(plotter, reader, 'updated ice thickness', scalar_bar_args=ice_scalar_bar_args)
 #
+# adj_scalar_bar_args = {
+#             "title": 'Adjoint sensitivity',
+#             "position_x": 0.2,
+#             "position_y": 0.05,
+#             "vertical": False,
+#             "title_font_size": 22,
+#             "label_font_size": 18,
+#             "fmt": "%.1e",
+#             "font_family": "arial",
+#             "n_labels": 3,
+#         }
+#
+# adj_reader = pv.get_reader("adj_ice.pvd")
+# adj_reader.set_active_time_point(15)
+# add_sensitivity_ring(plotter, adj_reader, scalar_bar_args=adj_scalar_bar_args)
 # plotter.camera_position = 'xy'
 # plotter.show(jupyter_backend="static", interactive=False)
 # # Closes and finalizes movie
@@ -772,11 +794,18 @@ continue_annotation()
 # -
 
 # We can see that we have been able to recover two ice sheets in the correct locations and
-# the final displacement pattern is very similar to the target run. We can confirm that
+# the final displacement pattern is very similar to the target run.
+
+# And we'll write the functional values to a file so that we can test them.
+
+with open("functional_field.txt", "w") as f:
+    f.write("\n".join(str(x) for x in functional_values))
+
+# We can confirm that
 # the surface misfit has reduced by plotting the objective function at each iteration.
 
 # + tags=["active-ipynb"]
-# plt.plot(J_list, '-x')
-# plt.xlabel("Iteration number")
-# plt.ylabel("Objective function")
-# -
+# plt.semilogy(functional_values)
+# plt.xlabel("Iteration #")
+# plt.ylabel("Functional value")
+# plt.title("Convergence")
