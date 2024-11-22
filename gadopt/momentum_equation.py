@@ -58,7 +58,7 @@ def viscosity_term(
 
     sigma = interior_penalty_factor(eq)
     sigma *= FacetArea(eq.mesh) / avg(CellVolume(eq.mesh))
-    if not is_continuous(eq.trial_space):
+    if not is_continuous(eq.mesh, eq.trial_space):
         trial_tensor_jump = tensor_jump(eq.n, trial) + tensor_jump(trial, eq.n)
         if compressible_stress:
             trial_tensor_jump -= 2 / 3 * identity * jump(trial, eq.n)
@@ -133,7 +133,7 @@ def viscosity_term(
 def pressure_gradient_term(
     eq: Equation, trial: Argument | ufl.indexed.Indexed | Function
 ) -> Form:
-    assert normal_is_continuous(eq.test)
+    assert normal_is_continuous(eq.mesh, eq.test)
 
     F = -dot(div(eq.test), eq.p) * eq.dx
 
@@ -150,7 +150,7 @@ def pressure_gradient_term(
 def divergence_term(
     eq: Equation, trial: Argument | ufl.indexed.Indexed | Function
 ) -> Form:
-    assert normal_is_continuous(eq.u)
+    assert normal_is_continuous(eq.mesh, eq.u)
 
     rho = eq.rho_mass
     F = -dot(eq.test, div(rho * eq.u)) * eq.dx

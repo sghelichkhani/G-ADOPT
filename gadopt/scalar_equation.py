@@ -42,7 +42,7 @@ def advection_term(
         F = -trial * div(eq.test * u) * eq.dx
         F += trial * dot(eq.n, u) * eq.test * eq.ds  # Boundary term in the weak form
 
-        if not (is_continuous(eq.trial_space) and normal_is_continuous(eq.u)):
+        if not (is_continuous(eq.mesh, eq.trial_space) and normal_is_continuous(eq.mesh, eq.u)):
             # s = 0: u.n(-) < 0 => flow goes from '+' to '-' => '+' is upwind
             # s = 1: u.n(-) > 0 => flow goes from '-' to '+' => '-' is upwind
             s = 0.5 * (sign(dot(avg(u), eq.n("-"))) + 1.0)
@@ -88,7 +88,7 @@ def diffusion_term(
     F = inner(grad(eq.test), dot(diff_tensor, grad(q))) * eq.dx
 
     sigma = interior_penalty_factor(eq, shift=-1)
-    if not is_continuous(eq.trial_space):
+    if not is_continuous(eq.mesh, eq.trial_space):
         sigma_int = sigma * avg(FacetArea(eq.mesh) / CellVolume(eq.mesh))
         F += (
             sigma_int

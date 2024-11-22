@@ -151,16 +151,16 @@ def _get_element(ufl_or_element):
         return ufl_or_element.ufl_element()
 
 
-def is_continuous(expr):
+def is_continuous(mesh, expr):
     if isinstance(expr, ufl.tensors.ListTensor):
-        return all(is_continuous(x) for x in expr.ufl_operands)
+        return all(is_continuous(mesh, x) for x in expr.ufl_operands)
 
     if isinstance(expr, ufl.indexed.Indexed):
         elem = expr.ufl_operands[0].ufl_element()
         if isinstance(elem, finat.ufl.MixedElement):
             # the second operand is a MultiIndex
             assert len(expr.ufl_operands[1]) == 1
-            sub_element_index, _ = elem.extract_subelement_component(int(expr.ufl_operands[1][0]))
+            sub_element_index, _ = elem.extract_subelement_component(mesh, int(expr.ufl_operands[1][0]))
             elem = elem.sub_elements[sub_element_index]
     else:
         elem = _get_element(expr)
@@ -173,11 +173,11 @@ def depends_on(ufl_expr, terminal):
     return terminal in traverse_unique_terminals(ufl_expr)
 
 
-def normal_is_continuous(expr):
+def normal_is_continuous(mesh, expr):
     # if we get some list expression, we can't guarantee its normal is continuous
     # unless all components are
     if isinstance(expr, ufl.tensors.ListTensor):
-        return is_continuous(expr)
+        return is_continuous(mesh, expr)
 
     elem = _get_element(expr)
 

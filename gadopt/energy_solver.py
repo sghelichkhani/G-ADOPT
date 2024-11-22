@@ -103,7 +103,7 @@ class EnergySolver:
                     self.solver_parameters['ksp_converged_reason'] = None
         else:
             self.solver_parameters = solver_parameters
-        apply_strongly = is_continuous(T)
+        apply_strongly = is_continuous(self.mesh, T)
         self.strong_bcs = []
         self.weak_bcs = {}
         bcs = bcs or {}
@@ -138,7 +138,7 @@ class EnergySolver:
             "u": u,
         }
         if su_advection:
-            if not is_continuous(self.Q):
+            if not is_continuous(self.mesh, self.Q):
                 raise TypeError("SU advection requires a continuous function space.")
 
             log("Using SU advection")
