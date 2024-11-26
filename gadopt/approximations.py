@@ -491,12 +491,12 @@ class CompressibleInternalVariableApproximation(SmallDisplacementViscoelasticApp
         div_u = self.div_u(u)
         return sym(grad(u)) - 1/3 * div_u
 
-    def stress(self, u, m):
+    def stress(self, u, m_list):
         div_u = self.div_u(u)
         d = self.deviatoric_strain(u)
-        stress = self.bulk_modulus * div_u + 2 * self.shear_modulus * d
-#        for m in m_list:
-        stress -= 2 * self.shear_modulus * m
+        stress = self.bulk_modulus * div_u + 2 * len(m_list)* self.shear_modulus * d
+        for m in m_list:
+            stress -= 2 * self.shear_modulus * m
         return stress
 
     def buoyancy(self, displacement, background_density):
