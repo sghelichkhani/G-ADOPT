@@ -3,7 +3,7 @@ from gadopt.utility import vertical_component as vc
 import numpy as np
 import argparse
 from mpi4py import MPI
-OUTPUT = False
+OUTPUT = True
 output_directory = "./2d_analytic_compressible_internalvariable_viscoelastic_freesurface/"
 
 parser = argparse.ArgumentParser()
@@ -92,7 +92,7 @@ def viscoelastic_model(nx=80, dt_factor=0.1, sim_time="long", shear_modulus=1e11
 
     # Create output file
     if OUTPUT:
-        output_file = VTKFile(f"{output_directory}viscoelastic_freesurface_maxwelltime{float(maxwell_time/year_in_seconds):.0f}a_nx{nx}_dt{float(dt/year_in_seconds):.0f}a_tau{float(tau0/year_in_seconds):.0f}_symetricload.pvd")
+        output_file = VTKFile(f"{output_directory}viscoelastic_freesurface_maxwelltime{float(maxwell_time/year_in_seconds):.0f}a_nx{nx}_dt{float(dt/year_in_seconds):.0f}a_tau{float(tau0/year_in_seconds):.0f}_symetricload_bulk2x_trace_nobuoy.pvd")
 
     # Setup boundary conditions
     stokes_bcs = {
@@ -104,7 +104,11 @@ def viscoelastic_model(nx=80, dt_factor=0.1, sim_time="long", shear_modulus=1e11
 
     # Setup analytical solution for the free surface from Cathles et al. 2024
     eta_analytical = Function(Q, name="eta analytical")
-    f_e = (bulk_modulus + 2*shear_modulus) / (bulk_modulus + shear_modulus)
+    eta_analytical2 = Function(Q, name="eta analytical2")
+
+    lambda_lame = bulk_modulus - 2/3 * shear_modulus
+
+    f_e = (lambda_lame + 2*shear_modulus) / (lambda_lame + shear_modulus)
     log("f_e: {f_e}")
     h_elastic = Constant((F0*rho0*g/(2*kk*shear_modulus))/(1 + f_e*maxwell_time/tau0))
     log("Maximum initial elastic displacement:", float(h_elastic))
@@ -115,16 +119,19 @@ def viscoelastic_model(nx=80, dt_factor=0.1, sim_time="long", shear_modulus=1e11
     log("diff F0-helastic2:", float(F0-h_elastic2))
 #    exit()
     eta_analytical.interpolate(((F0 - h_elastic) * (1-exp(-(time)/(tau0+f_e*maxwell_time)))+h_elastic) * cos(kk * X[0]))
+    h_elasticold = Constant((F0*rho0*g/(2*kk*shear_modulus)))
+    eta_analytical2.interpolate(((F0 - h_elasticold) * (1-exp(-(time)/(tau0)))+h_elasticold) * cos(kk * X[0]))
     error = 0  # Initialise error
+    error2 = 0  # Initialise error
 
-    stokes_solver = CompressibleViscoelasticStokesSolver(z, m, rho0, approximation,
+    stokes_solver = CompressibleViscoelasticStokesSolver(z, [m], rho0, approximation,
                                              dt, bcs=stokes_bcs,)
     
     m_solver = InternalVariableSolver(m, u, approximation,
                                              dt,  ImplicitMidpoint)
     vertical_displacement = Function(Q)
     if OUTPUT:
-        output_file.write(u_, m, eta_analytical)
+        output_file.write(u_, m, eta_analytical, eta_analytical2)
 
     # Now perform the time loop:
     for timestep in range(1, max_timesteps+1):
@@ -141,31 +148,35 @@ def viscoelastic_model(nx=80, dt_factor=0.1, sim_time="long", shear_modulus=1e11
 #        log("Greatest (-ve) displacement", displacement_min)
 
 
+        time.assign(time+dt) # tried updating tie after but doesnt seem to help...
         # Update analytical solution
         eta_analytical.interpolate(((F0 - h_elastic) * (1-exp(-(time)/(tau0+f_e*maxwell_time)))+h_elastic) * cos(kk * X[0]))
+        eta_analytical2.interpolate(((F0 - h_elasticold) * (1-exp(-(time)/(tau0)))+h_elasticold) * cos(kk * X[0]))
         
-        time.assign(time+dt) # Update time after because first solve with internal variable really is at t = 0?
 
         # Calculate error
         local_error = assemble(pow(u[1]-eta_analytical, 2)*ds(top_id))
+        local_error2 = assemble(pow(u[1]-eta_analytical2, 2)*ds(top_id))
         print(local_error)
         error += local_error * float(dt)
+        error2 += local_error2 * float(dt)
 
         # Write output:
         if timestep % dump_period == 0:
             log("timestep", timestep)
             log("time", float(time))
             if OUTPUT:
-                output_file.write(u_, m, eta_analytical)
+                output_file.write(u_, m, eta_analytical, eta_analytical2)
 
     final_error = pow(error, 0.5)/L
-    return final_error
+    final_error2 = pow(error2, 0.5)/L
+    return final_error, final_error2
 
 
 params = {
     "viscoelastic": {
         "dtf_start": 0.01,
-        "nx": 80,
+        "nx": 160,
         "sim_time": "long",
         "shear_modulus": 1e11},
     "elastic": {
@@ -186,14 +197,28 @@ def run_benchmark(case_name):
     # Run default case run for four dt factors
     dtf_start = params[case_name]["dtf_start"]
     params[case_name].pop("dtf_start")  # Don't pass this to viscoelastic_model
-    dt_factors = dtf_start / (2 ** np.arange(4))
-    prefix = f"errors-{case_name}-compressible-internalvariable_bulk2xshear_80cells_dtfstart0.1_fsu_stressu_newhelastic_compressiblebuoyancy_dtafter"
-    errors = np.array([viscoelastic_model(dt_factor=dtf, **params[case_name]) for dtf in dt_factors])
+    dt_factors = dtf_start / (2 ** np.arange(6))
+    prefix = f"errors-{case_name}-compressible-internalvariable_bulk2xshear_160cells_dtfstart0.1_fsu_stressu_newhelastic_compressiblebuoyancy_dtafter_dispanal_lame_nobuoy"
+#    errors, errors2 = np.array([viscoelastic_model(dt_factor=dtf, **params[case_name]) for dtf in dt_factors])
+    errors = []
+    errors2= []
+    for dtf in dt_factors:
+        e1, e2 = viscoelastic_model(dt_factor=dtf, **params[case_name])
+        errors.append(e1)
+        errors2.append(e2)
+    
+    errors = np.array(errors)
+    errors2 = np.array(errors2)
     np.savetxt(f"{prefix}-free-surface.dat", errors)
     ref = errors[-1]
     relative_errors = errors / ref
     convergence = np.log2(relative_errors[:-1] / relative_errors[1:])
     print(convergence)
+    
+    ref2 = errors2[-1]
+    relative_errors2 = errors2 / ref2
+    convergence2 = np.log2(relative_errors2[:-1] / relative_errors2[1:])
+    print(convergence2)
 
 
 if __name__ == "__main__":

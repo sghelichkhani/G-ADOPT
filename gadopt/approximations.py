@@ -10,7 +10,7 @@ import abc
 from numbers import Number
 from typing import Optional
 
-from firedrake import Function, Identity, div, grad, inner, sym, ufl
+from firedrake import Function, Identity, div, grad, inner, sym, ufl, tr
 
 from .utility import ensure_constant, vertical_component
 
@@ -488,8 +488,9 @@ class CompressibleInternalVariableApproximation(SmallDisplacementViscoelasticApp
         return div(u) * Identity(dim)
 
     def deviatoric_strain(self, u):
-        div_u = self.div_u(u)
-        return sym(grad(u)) - 1/3 * div_u
+        dim = len(u)
+        e = sym(grad(u))
+        return e - 1/3 * tr(e) * Identity(dim)
 
     def stress(self, u, m_list):
         div_u = self.div_u(u)
@@ -498,9 +499,10 @@ class CompressibleInternalVariableApproximation(SmallDisplacementViscoelasticApp
         for m in m_list:
             stress -= 2 * self.shear_modulus * m
         return stress
-
-    def buoyancy(self, displacement, background_density):
+    
+    # analytical solution for compressibility only converges without this term...
+    #def buoyancy(self, displacement, background_density):
         # Buoyancy term rho1, coming from linearisation and integrating the continuity equation w.r.t time
         # accounts for advection of density in the absence of an evolution equation for temperature
-        buoyancy = super().buoyancy(displacement, background_density)
-        return buoyancy - self.g * -background_density * div(displacement)
+    #    buoyancy = super().buoyancy(displacement, background_density)
+    #    return buoyancy - self.g * -background_density * div(displacement)
