@@ -657,8 +657,6 @@ class CompressibleViscoelasticStokesSolver:
         self.equations = equations(self.Z, self.Z, quad_degree=quad_degree,
                                    compressible=approximation.compressible)
 
-        print(self.equations._terms)
-
         self.u = z
         self.solution = z
         self.m = m
@@ -834,4 +832,125 @@ class CompressibleViscoelasticStokesSolver:
         if not self._solver_setup:
             self.setup_solver()
 
+        self.solver.solve()
+
+
+from abc import ABC, abstractmethod, abstractproperty
+class TimeIntegratorBase(ABC):
+    """
+    Abstract class that defines the API for all time integrators
+
+    Both :class:`TimeIntegrator` and :class:`CoupledTimeIntegrator` inherit
+    from this class.
+    """
+
+    @abstractmethod
+    def advance(self, t, update_forcings=None):
+        """
+        Advances equations for one time step
+
+        :arg t: simulation time
+        :type t: float
+        :arg update_forcings: user-defined function that takes the simulation
+            time and updates any time-dependent boundary conditions
+        """
+        pass
+
+    @abstractmethod
+    def initialize(self, init_solution):
+        """
+        Initialize the time integrator
+
+        :arg init_solution: initial solution
+        """
+        pass
+class CoupledTimeIntegrator(TimeIntegratorBase):
+    def __init__(self, equations, solution, fields, coupling, dt, bcs=None, solver_parameters={}):
+        """
+        :arg equations: the equations to solve
+        :type equations: list of :class:`BaseEquation` objects
+        :arg solution: :class:`Function` of MixedFunctionSpace where solution will be stored
+        :arg fields: Dictionary of fields that are passed to the equation (any functions that are not part of the solution)
+        :type fields: dict of :class:`Function` or :class:`Constant` objects
+        :arg coupling: for each equation a map (dict) from field name to number of the (different) equation whose trial function
+                       should be used for that field name (see example below)
+        :type coulings: list of dicts
+        :arg float dt: time step in seconds
+        :kwarg dict solver_parameters: PETSc solver options
+
+
+        Example for coupling:
+        Suppose we couple three equations:
+        0) a scalar adv. diff. equation for a density
+        1) a momentum equation to solve for velocity
+        2) a contintuity equation with associated trial function of pressure
+        Then if equation 0) uses velocity of 1), equation 1) uses pressure of 2) and
+        density of 0), and equation 2) is a continuity constraint on velocity of 1), we get:
+            coupling = [{'velocity': 1}, {'pressure': 2, 'density': 0}, {'velocity': 1}]
+        """
+
+        super(CoupledTimeIntegrator, self).__init__()
+
+        self.equations = equations
+        self.solution = solution
+        self.test = fd.TestFunctions(solution.function_space())
+        self.fields = fields
+        self.coupling = coupling
+        self.dt = dt
+        self.dt_const = fd.Constant(dt)
+        self.bcs = bcs
+
+        # unique identifier used in solver
+        self.name = '-'.join([self.__class__.__name__]
+                             + [eq.__class__.__name__ for eq in self.equations])
+
+        self.solver_parameters = {}
+        self.solver_parameters.update(solver_parameters)
+
+
+class CoupledEquationsTimeIntegrator(CoupledTimeIntegrator):
+    def __init__(self, equations, solution, fields, dt, bcs=None, mass_terms=None, solver_parameters={}, strong_bcs=None):
+        super().__init__(equations, solution, fields, {}, dt, bcs, solver_parameters)
+
+        if mass_terms is None:
+            self.mass_terms = [True]*len(equations)
+        else:
+            self.mass_terms = mass_terms
+
+        self.strong_bcs = strong_bcs
+        self.theta = 1
+        self.solution_old = fd.Function(self.solution)
+        self._initialized = False
+
+    def initialize(self, init_solution):
+        self.solution_old.assign(init_solution)
+        z_theta = (1-self.theta)*self.solution_old + self.theta*self.solution
+
+        self._fields = []
+        for fields in self.fields:
+            cfields = fields.copy()
+            for field_name, field_expr in fields.items():
+                if isinstance(field_expr, float):
+                    continue
+                cfields[field_name] = fd.replace(field_expr, {self.solution: z_theta})
+            self._fields.append(cfields)
+
+        F = 0
+        for test, u, u_old, eq, mass_term, fields, bcs in zip(self.test, fd.split(self.solution), fd.split(self.solution_old), self.equations, self.mass_terms, self._fields, self.bcs):
+            if mass_term:
+                F += eq.mass_term(test, u-u_old)
+
+            u_theta = (1-self.theta)*u_old + self.theta*u
+            F -= self.dt_const * eq.residual(test, u_theta, u_theta, fields, bcs=bcs)
+
+        self.problem = fd.NonlinearVariationalProblem(F, self.solution, bcs=self.strong_bcs)
+        self.solver = fd.NonlinearVariationalSolver(self.problem,
+                                                           solver_parameters=self.solver_parameters,
+                                                           options_prefix=self.name)
+        self._initialized = True
+
+    def advance(self, t, update_forcings=None):
+        if not self._initialized:
+            self.initialize(self.solution)
+        self.solution_old.assign(self.solution)
         self.solver.solve()
