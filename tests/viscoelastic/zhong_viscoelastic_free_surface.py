@@ -126,7 +126,15 @@ def viscoelastic_model(nx=80, dt_factor=0.1, sim_time="long", shear_modulus=1e11
 
         # Calculate error
         local_error = assemble(pow(displacement[1]-eta_analytical, 2)*ds(top_id))
-        error += local_error * float(dt)
+        if sim_time == 'long':
+             error += local_error * float(dt)
+         else:
+             # For elastic solve only one timestep so 
+             # don't scale error by timestep length 
+             # (get 1.5x convergence rate as artificially
+             # making error smaller)
+             error += local_error
+
 
         # Write output:
         if timestep % dump_period == 0:
