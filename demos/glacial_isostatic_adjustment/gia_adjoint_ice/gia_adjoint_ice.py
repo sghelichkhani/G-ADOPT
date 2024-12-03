@@ -322,7 +322,7 @@ log(f"Simulation start time: {Tstart} years")
 # contrast across the free surface.
 
 # Setup boundary conditions
-exterior_density = rho_ice * normalised_ice_thickness
+exterior_density = rho_ice * (0.5 + 0.5*tanh(10*(normalised_ice_thickness-0.5)))
 stokes_bcs = {
     top_id: {
         'normal_stress': ice_load,
