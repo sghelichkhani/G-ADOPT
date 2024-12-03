@@ -76,12 +76,6 @@ jobs:
           . /home/firedrake/firedrake/bin/activate
           python3 -m pip install .[demos,optimisation]
 
-      - name: Patch Firedrake components
-        run: |
-          cp .patches/finat.patch /home/firedrake/firedrake/src/FInAT
-          cd /home/firedrake/firedrake/src/FInAT
-          git apply finat.patch
-
       - name: Get Muller et al 2022 plate reconstructions
         run: |
           s3cmd --config=$HOME/.s3cfg/config get s3://gadopt/github-actions/Muller_etal_2022_SE_1Ga_Opt_PlateMotionModel_v1.2.zip .
