@@ -187,7 +187,7 @@ params = {
         "bulk_modulus": 2e11},
     "elastic-compressible": {
         "dtf_start": 0.001,
-        "nx": 80,
+        "nx": 160,
         "sim_time": "short",
         "shear_modulus": 1e11,
         "bulk_modulus": 2e11},

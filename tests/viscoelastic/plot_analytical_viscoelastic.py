@@ -6,7 +6,7 @@ from mpltools import annotation
 folder = "./"
 
 # Weerdesteijn resolution/timestep sensitivity figure
-fig, axs = plt.subplots(1, 3, figsize=(21, 7))
+fig, axs = plt.subplots(1, 3, figsize=(24, 7))
 year_in_seconds = 86400*365.25
 tau0 = 23613.45174353904*year_in_seconds  # viscous free surface relaxation time
 
@@ -17,7 +17,7 @@ params = {
         "xlim":[0.0008, 0.1],
         "sim_time": "short",
         "maxwell": 1e21 / 1e11,
-        "annotation_centre": [0.05, 1e-4],
+        "annotation_centre": [0.03, 7e-5],
         "subtitle": r"$\Delta$t < $\alpha$"},
     "viscoelastic": {
         "dtf_start": 0.1,
@@ -25,15 +25,15 @@ params = {
         "xlim":[0.1, 10],
         "sim_time": "long",
         "maxwell": 1e21 / 1e11,
-        "annotation_centre": [5, 5e-9],
+        "annotation_centre": [3, 1.5e-9],
         "subtitle": r"$\Delta$t ~ $\alpha$"},
     "viscous": {
         "dtf_start": 0.1,
         "nx": 80,
-        "xlim":[80, 1e4],
+        "xlim":[700, 1e4],
         "sim_time": "long",
         "maxwell": 1e21 / 1e14,
-        "annotation_centre": [5000, 5e-9],
+        "annotation_centre": [3000, 2e-9],
         "subtitle": r"$\Delta$t > $\alpha$"},
 }
 
@@ -78,15 +78,15 @@ for case_name, plot_data in params.items():
         axes.loglog(dt_factors_nc, errors_internal_notcoupled, ls="--", marker=marker, color='k', label=label)
 
     if c ==2:
-        errors_internal = np.loadtxt(f'errors-viscous-incompressible-internalvariable-coupled-80cells-free-surface.dat')
-        errors_internal = errors_internal / (2*tau0)
-        marker ='o'
-        label='internal variable coupled (nz = 80)'
-        axes.loglog(dt_factors, errors_internal, marker=marker, color='k', label=label)
+#        errors_internal = np.loadtxt(f'errors-viscous-incompressible-internalvariable-coupled-80cells-free-surface.dat')
+#        errors_internal = errors_internal / (2*tau0)
+#        marker ='o'
+#        label='internal variable coupled (nz = 80)'
+#        axes.loglog(dt_factors, errors_internal, marker=marker, color='k', label=label)
         
         errors_internal = np.loadtxt(f'errors-viscous-incompressible-internalvariable-coupled-160cells-free-surface.dat')
         errors_internal = errors_internal / (2*tau0)
-        marker ='^'
+        marker ='o'
         label='internal variable coupled (nz = 160)'
         axes.loglog(dt_factors, errors_internal, marker=marker, color='k', label=label)
 

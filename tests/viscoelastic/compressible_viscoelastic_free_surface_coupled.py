@@ -159,6 +159,7 @@ def viscoelastic_model(nx=80, dt_factor=0.1, sim_time="long", shear_modulus=1e11
     fields = [fields_mom, fields_int_var]
     
     direct_stokes_solver_parameters = {
+        "snes_monitor": None,
         "mat_type": "aij",
         "ksp_type": "preonly",
         "pc_type": "lu",

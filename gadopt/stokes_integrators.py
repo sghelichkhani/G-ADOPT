@@ -943,6 +943,8 @@ class CoupledEquationsTimeIntegrator(CoupledTimeIntegrator):
             u_theta = (1-self.theta)*u_old + self.theta*u
             F -= self.dt_const * eq.residual(test, u_theta, u_theta, fields, bcs=bcs)
 
+        scale_mu = fd.Constant(1e10)  # this is a scaling factor roughly size of mantle maxwell time to make sure that solve converges with strong bcs in parallel...
+        F = (1 / scale_mu)*F
         self.problem = fd.NonlinearVariationalProblem(F, self.solution, bcs=self.strong_bcs)
         self.solver = fd.NonlinearVariationalSolver(self.problem,
                                                            solver_parameters=self.solver_parameters,
