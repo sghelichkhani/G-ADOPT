@@ -170,6 +170,7 @@ def viscoelastic_model(nx=80, dt_factor=0.1, sim_time="long", shear_modulus=1e11
     parameters = {"mat_type": "matfree",
               "snes_monitor": None,
               "ksp_type": "gmres",
+              "ksp_rtol": 1e-7,
 #              "ksp_type": "preonly",
               "pc_type": "fieldsplit",
               "pc_fieldsplit_type": "multiplicative",
