@@ -1,4 +1,9 @@
-"""Utility functions for G-ADOPT"""
+r"""This module provides several classes and functions to perform a number of pre-, syn-,
+and post-processing tasks. Users incorporate utility as required in their code,
+depending on what they would like to achieve.
+
+"""
+
 from firedrake import outer, ds_v, ds_t, ds_b, CellDiameter, CellVolume, dot, JacobianInverse
 from firedrake import sqrt, Function, FiniteElement, TensorProductElement, FunctionSpace, VectorFunctionSpace
 from firedrake import as_vector, SpatialCoordinate, Constant, max_value, min_value, dx, assemble, tanh
@@ -6,7 +11,6 @@ from firedrake import op2, VectorElement, DirichletBC, utils
 from firedrake.__future__ import Interpolator
 from firedrake.ufl_expr import extract_unique_domain
 import ufl
-import finat.ufl
 import time
 from ufl.corealg.traversal import traverse_unique_terminals
 from firedrake.petsc import PETSc
@@ -43,17 +47,19 @@ class ParameterLog:
 
 
 class TimestepAdaptor:
+    """Computes timestep based on CFL condition for provided velocity field
+
+    Arguments:
+      dt_const: Constant whose value will be updated by the timestep adaptor
+      u: Velocity to base CFL condition on
+      V: FunctionSpace for reference velocity, usually velocity space
+      target_cfl: CFL number to target with chosen timestep
+      increase_tolerance: Maximum tolerance timestep is allowed to change by
+      maximum_timestep: Maximum allowable timestep
+
     """
-    Computes timestep based on CFL condition for provided velocity field"""
 
     def __init__(self, dt_const, u, V, target_cfl=1.0, increase_tolerance=1.5, maximum_timestep=None):
-        """
-        :arg dt_const:      Constant whose value will be updated by the timestep adaptor
-        :arg u:             Velocity to base CFL condition on
-        :arg V:             FunctionSpace for reference velocity, usually velocity space
-        :kwarg target_cfl:  CFL number to target with chosen timestep
-        :kwarg increase_tolerance: Maximum tolerance timestep is allowed to change by
-        :kwarg maximum_timestep:   Maximum allowable timestep"""
         self.dt_const = dt_const
         self.u = u
         self.target_cfl = target_cfl
@@ -85,8 +91,8 @@ class TimestepAdaptor:
         return float(self.dt_const)
 
 
-def upward_normal(mesh, cartesian):
-    if cartesian:
+def upward_normal(mesh):
+    if mesh.cartesian:
         n = mesh.geometric_dimension()
         return as_vector([0]*(n-1) + [1])
     else:
@@ -95,11 +101,13 @@ def upward_normal(mesh, cartesian):
         return X/r
 
 
-def vertical_component(u, cartesian):
-    if cartesian:
+def vertical_component(u):
+    mesh = extract_unique_domain(u)
+
+    if mesh.cartesian:
         return u[u.ufl_shape[0]-1]
     else:
-        n = upward_normal(extract_unique_domain(u), cartesian)
+        n = upward_normal(mesh)
         return sum([n_i * u_i for n_i, u_i in zip(n, u)])
 
 
@@ -136,6 +144,14 @@ class CombinedSurfaceMeasure(ufl.Measure):
 
 
 def _get_element(ufl_or_element):
+    if isinstance(ufl_or_element, ufl.indexed.Indexed):
+        expr, multiindex = ufl_or_element.ufl_operands
+        V = expr.ufl_function_space()
+        for i in multiindex:
+            comp_to_subspace = tuple(j for j, W in enumerate(V) for k in range(W.value_size))
+            V = V.sub(comp_to_subspace[int(i)])
+        ufl_or_element = V
+
     if isinstance(ufl_or_element, ufl.AbstractFiniteElement):
         return ufl_or_element
     else:
@@ -146,15 +162,7 @@ def is_continuous(expr):
     if isinstance(expr, ufl.tensors.ListTensor):
         return all(is_continuous(x) for x in expr.ufl_operands)
 
-    if isinstance(expr, ufl.indexed.Indexed):
-        elem = expr.ufl_operands[0].ufl_element()
-        if isinstance(elem, finat.ufl.MixedElement):
-            # the second operand is a MultiIndex
-            assert len(expr.ufl_operands[1]) == 1
-            sub_element_index, _ = elem.extract_subelement_component(int(expr.ufl_operands[1][0]))
-            elem = elem.sub_elements[sub_element_index]
-    else:
-        elem = _get_element(expr)
+    elem = _get_element(expr)
 
     return elem in ufl.H1
 
@@ -177,46 +185,19 @@ def normal_is_continuous(expr):
 
 def cell_size(mesh):
     if hasattr(mesh.ufl_cell(), 'sub_cells'):
-        return sqrt(CellVolume(mesh))
+        return CellVolume(mesh) ** (1/mesh.topological_dimension())
     else:
         return CellDiameter(mesh)
-
-
-def cell_edge_integral_ratio(mesh, p):
-    r"""
-    Ratio C such that \int_f u^2 <= C Area(f)/Volume(e) \int_e u^2
-    for facets f, elements e and polynomials u of degree p.
-
-    See eqn. (3.7) ad table 3.1 from Hillewaert's thesis: https://www.researchgate.net/publication/260085826
-    and its appendix C for derivation."""
-    cell_type = mesh.ufl_cell().cellname()
-    if cell_type == "triangle":
-        return (p+1)*(p+2)/2.
-    elif cell_type == "quadrilateral" or cell_type == "interval * interval":
-        return (p+1)**2
-    elif cell_type == "triangle * interval":
-        return (p+1)**2
-    elif cell_type == "quadrilateral * interval":
-        # if e is a wedge and f is a triangle: (p+1)**2
-        # if e is a wedge and f is a quad: (p+1)*(p+2)/2
-        # here we just return the largest of the the two (for p>=0)
-        return (p+1)**2
-    elif cell_type == "tetrahedron":
-        return (p+1)*(p+3)/3
-    else:
-        raise NotImplementedError("Unknown cell type in mesh: {}".format(cell_type))
 
 
 def tensor_jump(v, n):
     r"""
     Jump term for vector functions based on the tensor product
 
-    .. math::
-        \text{jump}(\mathbf{u}, \mathbf{n}) = (\mathbf{u}^+ \mathbf{n}^+) +
-        (\mathbf{u}^- \mathbf{n}^-)
+    $$"jump"(bb u, bb n) = (bb u^+ bb n^+) + (bb u^- bb n^-)$$
 
     This is the discrete equivalent of grad(u) as opposed to the
-    vectorial UFL jump operator :meth:`ufl.jump` which represents div(u).
+    vectorial UFL jump operator `ufl.jump` which represents div(u).
     The equivalent of nabla_grad(u) is given by tensor_jump(n, u).
     """
     return outer(v('+'), n('+')) + outer(v('-'), n('-'))
@@ -224,7 +205,7 @@ def tensor_jump(v, n):
 
 def extend_function_to_3d(func, mesh_extruded):
     """
-    Returns a 3D view of a 2D :class:`Function` on the extruded domain.
+    Returns a 3D view of a 2D `Function` on the extruded domain.
     The 3D function resides in V x R function space, where V is the function
     space of the source function. The 3D function shares the data of the 2D
     function.
@@ -246,18 +227,19 @@ def extend_function_to_3d(func, mesh_extruded):
 
 
 class ExtrudedFunction(Function):
-    """
-    A 2D :class:`Function` that provides a 3D view on the extruded domain.
+    """A 2D `Function` that provides a 3D view on the extruded domain.
+
     The 3D function can be accessed as `ExtrudedFunction.view_3d`.
     The 3D function resides in V x R function space, where V is the function
     space of the source function. The 3D function shares the data of the 2D
-    function."""
+    function.
+
+    Arguments:
+      mesh_3d: Extruded 3D mesh where the function will be extended to.
+
+    """
 
     def __init__(self, *args, mesh_3d=None, **kwargs):
-        """
-        Create a 2D :class:`Function` with a 3D view on extruded mesh.
-        :arg mesh_3d: Extruded 3D mesh where the function will be extended to.
-        """
         # create the 2d function
         super().__init__(*args, **kwargs)
         print(*args)
@@ -305,25 +287,22 @@ def get_functionspace(mesh, h_family, h_degree, v_family=None, v_degree=None,
 
 
 class LayerAveraging:
-    """
-    A manager for computing a vertical profile of horizontal layer averages.
-    """
+    """A manager for computing a vertical profile of horizontal layer averages.
 
-    def __init__(self, mesh, r1d=None, cartesian=True, quad_degree=None):
-        """
-        Create the :class:`LayerAveraging` manager.
-        :arg mesh: The mesh over which to compute averages.
-        :kwarg r1d: An array of either depth coordinates or radii,
+    Arguments:
+      mesh: The mesh over which to compute averages
+      r1d: An array of either depth coordinates or radii,
              at which to compute layer averages. If not provided, and
              mesh is extruded, it uses the same layer heights. If mesh
              is not extruded, r1d is required.
-        :kwarg cartesian: Determines whether `r1d` represents depths or radii.
-        """
 
+    """
+
+    def __init__(self, mesh, r1d=None, quad_degree=None):
         self.mesh = mesh
         XYZ = SpatialCoordinate(mesh)
 
-        if cartesian:
+        if mesh.cartesian:
             self.r = XYZ[len(XYZ)-1]
         else:
             self.r = sqrt(dot(XYZ, XYZ))
@@ -401,17 +380,17 @@ class LayerAveraging:
         self.rhs[-1] = assemble(phi * T * self.dx)
 
     def get_layer_average(self, T):
-        """
-        Compute the layer averages of :class:`Function` T at the predefined depths.
-        Returns a numpy array containing the averages.
+        """Compute the layer averages of `Function` T at the predefined depths.
+
+        Returns:
+          A numpy array containing the averages.
         """
 
         self._assemble_rhs(T)
         return solveh_banded(self.mass, self.rhs, lower=True)
 
     def extrapolate_layer_average(self, u, avg):
-        """
-        Given an array of layer averages avg, extrapolate to :class:`Function` u
+        """Given an array of layer averages avg, extrapolate to `Function` u
         """
 
         r = self.r
@@ -451,7 +430,7 @@ def timer_decorator(func):
 
 class InteriorBC(DirichletBC):
     """DirichletBC applied to anywhere that is *not* on the specified boundary"""
-    @ utils.cached_property
+    @utils.cached_property
     def nodes(self):
         return np.array(list(set(range(self._function_space.node_count)) - set(super().nodes)))
 
@@ -461,18 +440,13 @@ def absv(u):
     return as_vector([abs(ui) for ui in u])
 
 
-def su_nubar(u, J, Pe):
-    """SU stabilisation viscosity as a function of velocity, Jacobian and grid Peclet number"""
-    # SU(PG) ala Donea & Huerta:
-    # Columns of Jacobian J are the vectors that span the quad/hex
-    # which can be seen as unit-vectors scaled with the dx/dy/dz in that direction (assuming physical coordinates x,y,z aligned with local coordinates)
-    # thus u^T J is (dx * u , dy * v)
-    # and following (2.44c) Pe = u^T J / (2*nu)
-    # beta(Pe) is the xibar vector in (2.44a)
-    # then we get artifical viscosity nubar from (2.49)
-    beta_pe = as_vector([1/tanh(Pei+1e-6) - 1/(Pei+1e-6) for Pei in Pe])
-
-    return dot(absv(dot(u, J)), beta_pe)/2
+def step_func(r, centre, mag, increasing=True, sharpness=50):
+    # A step function designed to design viscosity jumps
+    # Build a step centred at "centre" with given magnitude
+    # Increase with radius if "increasing" is True
+    return mag * (
+        0.5 * (1 + tanh((1 if increasing else -1) * (r - centre) * sharpness))
+    )
 
 
 def node_coordinates(function):
@@ -485,7 +459,7 @@ def node_coordinates(function):
     ]
 
 
-def interpolate_1d_profile(function: Function, one_d_filename: str, cartesian: bool):
+def interpolate_1d_profile(function: Function, one_d_filename: str):
     """
     Assign a one-dimensional profile to a Function `function` from a file.
 
@@ -496,10 +470,8 @@ def interpolate_1d_profile(function: Function, one_d_filename: str, cartesian: b
     Args:
         function: The function onto which the 1D profile will be assigned
         one_d_filename: The path to the file containing the 1D radial profile
-        cartesian: Whether the upward direction is along z/y (True) or radial (False)
 
     Note:
-        - Note the cartesian flag
         - This is designed to read a file with one process and distribute in parallel with MPI.
         - The input file should contain an array of radius/height and an array of values, separated by a comma.
     """
@@ -507,6 +479,11 @@ def interpolate_1d_profile(function: Function, one_d_filename: str, cartesian: b
 
     if mesh.comm.rank == 0:
         rshl, one_d_data = np.loadtxt(one_d_filename, unpack=True, delimiter=",")
+        if rshl[1] < rshl[0]:
+            rshl = rshl[::-1]
+            one_d_data = one_d_data[::-1]
+        if not np.all(np.diff(rshl) > 0):
+            raise ValueError("Data must be strictly monotonous.")
     else:
         one_d_data = None
         rshl = None
@@ -516,10 +493,10 @@ def interpolate_1d_profile(function: Function, one_d_filename: str, cartesian: b
 
     X = SpatialCoordinate(mesh)
 
-    upward_coord = vertical_component(X, cartesian=cartesian)
+    upward_coord = vertical_component(X)
 
     rad = Function(function.function_space()).interpolate(upward_coord)
 
-    averager = LayerAveraging(mesh, rshl if mesh.layers is None else None, cartesian=cartesian)
+    averager = LayerAveraging(mesh, rshl if mesh.layers is None else None)
     interpolated_visc = np.interp(averager.get_layer_average(rad), rshl, one_d_data)
     averager.extrapolate_layer_average(function, interpolated_visc)
