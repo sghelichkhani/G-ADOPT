@@ -28,6 +28,9 @@ def write_checkpoint(checkpoint_file, checkpoint_fields, dump_counter):
 
 def write_output(output_file):
     """Write output fields to the output file."""
+    for ls_solv in level_set_solver:
+        ls_solv.update_gradient()
+
     if simulation.dimensional:
         density.interpolate(rho_material)
     else:
